@@ -17,7 +17,7 @@ const engine = createEngine()
 const parser = new engine.Parser({ engine })
 
 // Init reader
-let reader: Reader
+let reader: Reader.ReaderPair
 if (TEST_BUFFER) {
 	const buffer = await fs.readFile(TEST_FILE)
 	const bytes = Uint8Array.from(buffer)

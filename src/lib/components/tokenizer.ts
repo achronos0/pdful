@@ -7,7 +7,7 @@
  */
 
 import { PdfError } from '../core.js'
-import type { SequentialReader } from './reader.js'
+import type { Reader } from './reader.js'
 import type { Engine } from './engine.js'
 
 /**
@@ -17,7 +17,7 @@ import type { Engine } from './engine.js'
  */
 export class Tokenizer {
 	readonly engine: Engine
-	readonly reader: SequentialReader
+	readonly reader: Reader.SequentialReader
 	readonly warnings: PdfError[]
 	pdfVersion: string | null = null
 
@@ -26,7 +26,7 @@ export class Tokenizer {
 	 */
 	constructor (config: {
 		engine: Engine,
-		sequentialReader: SequentialReader,
+		sequentialReader: Reader.SequentialReader,
 		warnings: PdfError[]
 	}) {
 		this.engine = config.engine
@@ -299,6 +299,7 @@ export class Tokenizer {
 		// xref
 		// trailer
 		// eof
+		// command
 		if (this.engine.constants.TOKEN_BYTE_KEYWORD.includes(byte)) {
 			const keyword = char + await this.reader.readStringWhile(this.engine.constants.TOKEN_BYTE_KEYWORD)
 			const end = this.reader.offset
@@ -382,7 +383,7 @@ export class Tokenizer {
 					return { type: 'eof', start, end, value: xrefOffset }
 				}
 			}
-			return { type: 'junk', start, end, value: keyword }
+			return { type: 'op', start, end, value: keyword }
 		}
 
 		// junk data
@@ -394,13 +395,13 @@ export type Token = (
 	TokenSpace | TokenComment | TokenJunk |
 	TokenNull | TokenBooolean | TokenInteger | TokenReal | TokenString | TokenHexstring | TokenName |
 	TokenArrayStart | TokenArrayEnd | TokenDictionaryStart | TokenDictionaryEnd |
-	TokenIndirectStart | TokenIndirectEnd | TokenRef | TokenStream | TokenXref | TokenTrailer | TokenEof
+	TokenIndirectStart | TokenIndirectEnd | TokenRef | TokenStream | TokenXref | TokenTrailer | TokenEof | TokenOp
 )
 export type TokenType = (
 	'space' | 'comment' | 'junk' |
 	'null' | 'boolean' | 'integer' | 'real' | 'string' | 'hexstring' | 'name' |
 	'array_start' | 'array_end' | 'dictionary_start' | 'dictionary_end' |
-	'indirect_start' | 'indirect_end' | 'ref' | 'stream' | 'xref' | 'trailer' | 'eof'
+	'indirect_start' | 'indirect_end' | 'ref' | 'stream' | 'xref' | 'trailer' | 'eof' | 'op'
 )
 export type TokenValue = (
 	null | boolean | number | string | number[] |
@@ -495,4 +496,8 @@ export interface TokenTrailer extends TokenBase {
 export interface TokenEof extends TokenBase {
 	type: 'eof',
 	value: number
+}
+export interface TokenOp extends TokenBase {
+	type: 'op',
+	value: string
 }

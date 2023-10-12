@@ -33,7 +33,7 @@ export class Lexer {
 		this.warnings = config.warnings
 	}
 
-	start (rootObject = this.objectCollection.root) {
+	start (rootObject: Model.PdfObjectWithChildren) {
 		this.stack = [rootObject]
 	}
 

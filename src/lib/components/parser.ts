@@ -16,28 +16,29 @@ export class Parser {
 		this.engine = config.engine
 	}
 
-	async run (reader: Reader) {
+	async run (reader: Reader.ReaderPair) {
+		const sequentialReader = reader.sequentialReader
+		const offsetReader = reader.offsetReader
 		const objectCollection = new this.engine.Model.Collection()
 		const warnings: PdfError[] = []
-		await this.parseDocument({ reader, objectCollection, warnings })
-		await this.parseStreams({ reader, objectCollection, warnings })
+		await this.parseDocument({ sequentialReader, objectCollection, warnings })
+		await this.parseStreams({ offsetReader, objectCollection, warnings })
 		return { objectCollection, warnings }
 	}
 
 	async parseDocument (config: {
-		reader: Reader,
+		sequentialReader: Reader.SequentialReader,
 		objectCollection: Model.Collection,
 		warnings: PdfError[]
 	}) {
-		const reader = config.reader
+		const sequentialReader = config.sequentialReader
 		const objectCollection = config.objectCollection
 		const warnings = config.warnings
 		const engine = this.engine
-		const sequentialReader = reader.sequentialReader
 		const tokenizer = new this.engine.Tokenizer({ engine, sequentialReader, warnings })
 		const lexer = new this.engine.Lexer({ engine, objectCollection, warnings })
 		await tokenizer.start()
-		lexer.start()
+		lexer.start(objectCollection.root)
 		const tokenGenerator = tokenizer.tokens()
 		for await (const token of tokenGenerator) {
 			lexer.pushToken(token)
@@ -46,14 +47,13 @@ export class Parser {
 	}
 
 	async parseStreams (config: {
-		reader: Reader,
+		offsetReader: Reader.OffsetReader,
 		objectCollection: Model.Collection,
 		warnings: PdfError[]
 	}) {
-		const reader = config.reader
+		const offsetReader = config.offsetReader
 		const objectCollection = config.objectCollection
 		const warnings = config.warnings
-		const offsetReader = reader.offsetReader
 		for (const obj of objectCollection.streams.values()) {
 			const dictObj = obj.dictionary
 			if (!dictObj || !obj.sourceLocation) {
@@ -109,6 +109,7 @@ export class Parser {
 			}
 
 			console.log(bytes)
+			// const sequentialReader = new this.engine.Reader.SequentialMemoryReader(bytes)
 		}
 		this.resolveRefs(objectCollection)
 	}
@@ -123,4 +124,6 @@ export class Parser {
 			}
 		}
 	}
+
+	protected _parseData (config: {}) {}
 }
