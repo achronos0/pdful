@@ -7,9 +7,9 @@
 type FileHandle = import('node:fs/promises').FileHandle
 
 /**
- * Base class for data readers used by {@link Tokenizer}
+ * Base class for sequential data reader implementations
  */
-export class SequentialReader {
+export abstract class SequentialReader {
 	/**
 	 * Total byte length of document data
 	 */
@@ -202,20 +202,9 @@ export class SequentialReader {
 }
 
 /**
- * File data reader for {@link Tokenizer}
+ * Sequential file data reader for {@link Tokenizer}
  */
 export class SequentialFileReader extends SequentialReader {
-	/**
-	 *
-	 * @param fileHandle file handle object
-	 * @param bufferLength read chunk size in bytes, null to use default
-	 */
-	static async createFromFileHandle (fileHandle: FileHandle, bufferLength: number | null = null): Promise<SequentialFileReader> {
-		const stat = await fileHandle.stat()
-		const fileSize = stat.size
-		return new SequentialFileReader(fileHandle, fileSize, bufferLength || this.DEFAULT_CHUNK_SIZE)
-	}
-
 	static get DEFAULT_CHUNK_SIZE () {
 		return 134217728
 	}
@@ -228,7 +217,7 @@ export class SequentialFileReader extends SequentialReader {
 	protected bufferLength: number
 
 	/**
-	 * Create data reader from file handle
+	 * Create data reader from file handle and size
 	 *
 	 * @param {number} fileSize file length in bytes
 	 * @param {number} bufferLength read chunk size in bytes
@@ -242,7 +231,6 @@ export class SequentialFileReader extends SequentialReader {
 		this.bufferOffset = -1
 		this.bufferLength = bufferLength
 	}
-
 
 	/**
 	 * Read next byte as int
@@ -288,7 +276,6 @@ export class SequentialFileReader extends SequentialReader {
 				length: this.bufferLength,
 				position: 0
 			})
-			console.log('A bytesRead=', res.bytesRead)
 			this.bufferLength = res.bytesRead
 			this.bufferOffset = 0
 			return
@@ -307,25 +294,15 @@ export class SequentialFileReader extends SequentialReader {
 				length: this.bufferLength - KEEP_BYTES,
 				position: this.offset + KEEP_BYTES
 			})
-			console.log('B bytesRead=', res.bytesRead)
 			this.bufferLength = res.bytesRead
 		}
 	}
 }
 
 /**
- * In-memory data reader for {@link Tokenizer}
+ * Sequential in-memory data reader for {@link Tokenizer}
  */
 export class SequentialMemoryReader extends SequentialReader {
-	/**
-	 * Create data reader from in-memory data
-	 *
-	 * bytes buffer containing document data
-	 */
-	static createFromArray (bytes: Uint8Array) {
-		return new SequentialMemoryReader(bytes)
-	}
-
 	readonly bytes: Uint8Array
 
 	/**
@@ -370,5 +347,132 @@ export class SequentialMemoryReader extends SequentialReader {
 			this.consume(length)
 		}
 		return data
+	}
+}
+
+/**
+ * Base class for random-access data readers
+ */
+export abstract class OffsetReader {
+	/**
+	 * Total byte length of document data
+	 */
+	readonly length: number
+	/**
+	 * Base constructor for OffsetReader classes
+	 *
+	 * @param length data length in bytes
+	 */
+	constructor (length: number) {
+		this.length = length
+	}
+
+	/**
+	 * Read bytes as int array
+	 *
+	 * @abstract
+	 * @param start byte offset to start reading at
+	 * @param end byte offset to stop reading at; the byte following the last byte of data to read
+	 * @returns byte int array
+	 */
+	async readArray (start: number, end: number): Promise<Uint8Array> {
+		throw new Error('abstract')
+	}
+}
+
+/**
+ * Random-access file data reader
+ */
+export class OffsetFileReader extends OffsetReader {
+	readonly fileHandle: FileHandle
+	readonly fileSize: number
+
+	/**
+	 * Create data reader from file handle and size
+	 *
+	 * @param {number} fileSize file length in bytes
+	 */
+	constructor (fileHandle: FileHandle, fileSize: number) {
+		super(fileSize)
+		this.fileHandle = fileHandle
+		this.fileSize = fileSize
+	}
+
+	/**
+	 * Read bytes as int array
+	 *
+	 * @param start byte offset to start reading at
+	 * @param end byte offset to stop reading at; the byte following the last byte of data to read
+	 * @returns byte int array
+	 */
+	async readArray (start: number, end: number) {
+		const buffer = Buffer.alloc(end - start)
+		const res = await this.fileHandle.read({
+			buffer,
+			position: start,
+			length: end - start
+		})
+		return new Uint8Array(res.buffer.buffer, 0, res.bytesRead)
+	}
+}
+
+/**
+ * Random-access in-memory data reader
+ */
+export class OffsetMemoryReader extends OffsetReader {
+	readonly bytes: Uint8Array
+
+	/**
+	 * Create data reader from in-memory data
+	 *
+	 * @param bytes buffer containing document data
+	 */
+	constructor (bytes: Uint8Array) {
+		super(bytes.length)
+		this.bytes = bytes
+	}
+
+	/**
+	 * Read bytes as int array
+	 *
+	 * @param start byte offset to start reading at
+	 * @param end byte offset to stop reading at; the byte following the last byte of data to read
+	 * @returns byte int array
+	 */
+	async readArray (start: number, end: number) {
+		return this.bytes.subarray(start, end)
+	}
+}
+
+export class Reader {
+	/**
+	 * Create data reader from file handle
+	 *
+	 * @param fileHandle file handle object
+	 */
+	static async createReaderFromFileHandle (fileHandle: FileHandle, bufferLength: number | null = null): Promise<Reader> {
+		const stat = await fileHandle.stat()
+		const fileSize = stat.size
+		const offsetReader = new OffsetFileReader(fileHandle, fileSize)
+		const sequentialReader = new SequentialFileReader(fileHandle, fileSize, bufferLength || SequentialFileReader.DEFAULT_CHUNK_SIZE)
+		return { offsetReader, sequentialReader }
+	}
+
+	/**
+	 * Create data reader from in-memory data
+	 *
+	 * @param bytes buffer containing document data
+	 */
+	static createReaderFromArray (bytes: Uint8Array): Reader {
+		const offsetReader = new OffsetMemoryReader(bytes)
+		const sequentialReader = new SequentialMemoryReader(bytes)
+		return { offsetReader, sequentialReader }
+	}
+
+	readonly offsetReader: OffsetReader
+	readonly sequentialReader: SequentialReader
+	constructor (config: { offsetReader: OffsetReader, sequentialReader: SequentialReader }) {
+		this.offsetReader = config.offsetReader
+		this.sequentialReader = config.sequentialReader
 	}
 }
