@@ -1,35 +1,45 @@
 /**
  * Manage PDF engine
+ *
+ * @module
  */
 
-import type { Constants } from './constants.js'
-import type { Lexer } from './lexer.js'
-import type { Model } from './model.js'
-import type { Reader } from './reader.js'
-import type { Parser } from './parser.js'
-import type { Tokenizer } from './tokenizer.js'
+import type { codecs } from './codecs.js'
+import type { literals } from './literals.js'
+import type { lexer } from './lexer.js'
+import type { io } from './io.js'
+import type { model } from './model.js'
+import type { parser } from './parser.js'
+import type { tokenizer } from './tokenizer.js'
 
-export class Engine {
-	Lexer: typeof Lexer
-	Model: typeof Model
-	Reader: typeof Reader
-	Parser: typeof Parser
-	Tokenizer: typeof Tokenizer
-	constants: Constants
+export namespace engine {
+	export class Engine {
+		codecs: typeof codecs
+		literals: typeof literals
+		lexer: typeof lexer
+		io: typeof io
+		model: typeof model
+		parser: typeof parser
+		tokenizer: typeof tokenizer
+		constants: literals.Constants
 
-	constructor (config: {
-		Constants: typeof Constants,
-		Lexer: typeof Lexer,
-		Model: typeof Model,
-		Reader: typeof Reader,
-		Parser: typeof Parser,
-		Tokenizer: typeof Tokenizer
-	}) {
-		this.Lexer = config.Lexer
-		this.Model = config.Model
-		this.Reader = config.Reader
-		this.Parser = config.Parser
-		this.Tokenizer = config.Tokenizer
-		this.constants = config.Constants.create()
+		constructor (config: {
+			codecs: typeof codecs,
+			literals: typeof literals,
+			lexer: typeof lexer,
+			io: typeof io,
+			model: typeof model,
+			parser: typeof parser,
+			tokenizer: typeof tokenizer
+		}) {
+			this.codecs = config.codecs
+			this.literals = config.literals
+			this.lexer = config.lexer
+			this.model = config.model
+			this.io = config.io
+			this.parser = config.parser
+			this.tokenizer = config.tokenizer
+			this.constants = config.literals.Constants.create()
+		}
 	}
 }

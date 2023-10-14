@@ -2,7 +2,7 @@
  * Debugging utilities
  */
 
-import { Model } from './components/model.js'
+import { model } from './components/model.js'
 
 export interface PrintObjectTreeOptions {
 	maxDepth?: number | null,
@@ -11,7 +11,7 @@ export interface PrintObjectTreeOptions {
 	contentValues?: boolean
 }
 
-export async function printObjectTree (obj: Model.PdfObject, options: PrintObjectTreeOptions = {}) {
+export async function printObjectTree (obj: model.PdfObject, options: PrintObjectTreeOptions = {}) {
 	const {
 		maxDepth = null,
 		indirectValues = true,
@@ -20,11 +20,11 @@ export async function printObjectTree (obj: Model.PdfObject, options: PrintObjec
 	} = options
 	const print = (str: string) => process.stdout.write(str)
 	const refsPrinted: Set<number> = new Set()
-	const walker = (obj: Model.PdfObject, depth: number) => {
+	const walker = (obj: model.PdfObject, depth: number) => {
 		let tagSuffix: string | null = null
-		const children: [prefix: string, child: Model.PdfObject][] = []
+		const children: [prefix: string, child: model.PdfObject][] = []
 		let extraLines: string[] = []
-		if (obj instanceof Model.PdfObjectType.Indirect && obj.identifier) {
+		if (obj instanceof model.PdfObjectType.Indirect && obj.identifier) {
 			tagSuffix = ` #R${obj.identifier.num}/${obj.identifier.gen}`
 			if (obj.direct) {
 				if (indirectValues) {
@@ -35,7 +35,7 @@ export async function printObjectTree (obj: Model.PdfObject, options: PrintObjec
 				tagSuffix += ' EMPTY'
 			}
 		}
-		else if (obj instanceof Model.PdfObjectType.Ref && obj.identifier) {
+		else if (obj instanceof model.PdfObjectType.Ref && obj.identifier) {
 			tagSuffix = ` ->#R${obj.identifier.num}/${obj.identifier.gen}`
 			if (obj.indirect) {
 				if (obj.direct && refValues) {
@@ -52,19 +52,19 @@ export async function printObjectTree (obj: Model.PdfObject, options: PrintObjec
 				tagSuffix += ' MISSING'
 			}
 		}
-		else if (obj instanceof Model.PdfObjectType.Array) {
+		else if (obj instanceof model.PdfObjectType.Array) {
 			tagSuffix = `(${obj.length})`
 			for (const child of obj.children.values()) {
 				children.push(['', child])
 			}
 		}
-		else if (obj instanceof Model.PdfObjectType.Dictionary) {
+		else if (obj instanceof model.PdfObjectType.Dictionary) {
 			tagSuffix = `(${obj.children.size})`
 			for (const [entryKey, entryObj] of obj.children) {
 				children.push([entryKey + ': ', entryObj])
 			}
 		}
-		else if (obj instanceof Model.PdfObjectType.Stream) {
+		else if (obj instanceof model.PdfObjectType.Stream) {
 			if (obj.dictionary) {
 				children.push(['Dictionary: ', obj.dictionary])
 			}
@@ -72,10 +72,10 @@ export async function printObjectTree (obj: Model.PdfObject, options: PrintObjec
 				children.push(['Data: ', obj.direct])
 			}
 		}
-		else if (obj instanceof Model.PdfObjectType.Boolean) {
+		else if (obj instanceof model.PdfObjectType.Boolean) {
 			tagSuffix = ' ' + obj.value ? ' true' : ' false'
 		}
-		else if (obj instanceof Model.PdfObjectType.Bytes) {
+		else if (obj instanceof model.PdfObjectType.Bytes) {
 			if (obj.value.length > 300) {
 				tagSuffix = ' [' + obj.value.slice(0, 200).join(' ') + ' ...]'
 			}
@@ -83,7 +83,7 @@ export async function printObjectTree (obj: Model.PdfObject, options: PrintObjec
 				tagSuffix = ' [' + obj.value.join(' ') + ']'
 			}
 		}
-		else if (obj instanceof Model.PdfObjectType.Text) {
+		else if (obj instanceof model.PdfObjectType.Text) {
 			tagSuffix = `(${obj.tokenType}/${obj.encoding})`
 			if (obj.value.length > 300) {
 				tagSuffix += ` "${obj.value.substring(0, 200)}..."`

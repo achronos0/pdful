@@ -1,7 +1,11 @@
 {
 	"type": "module",
+	"dependencies": {
+		"pako": "^2.1.0"
+	},
 	"devDependencies": {
 		"@types/node": "^20.8.4",
+		"@types/pako": "^2.0.1",
 		"tsx": "^3.13.0",
 		"typescript": "^5.2.2"
 	},

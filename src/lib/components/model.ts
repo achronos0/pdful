@@ -1,10 +1,10 @@
 /**
- * Utilities to work with pdf objects
+ * Utilities to work with pdf document object model
  *
  * @module
  */
 
-export namespace Model {
+export namespace model {
 	export interface PdfObject {
 		type: TypeString
 		collection: Collection
@@ -27,7 +27,8 @@ export namespace Model {
 
 	export type TypeString = (
 		'Null' | 'Boolean' | 'Integer' | 'Real' | 'Text' | 'Bytes' | 'Date' | 'Name' |
-		'Array' | 'Dictionary' | 'Indirect' | 'Ref' | 'Stream' | 'Content' | 'Root'
+		'Array' | 'Dictionary' | 'Indirect' | 'Ref' | 'Stream' | 'Xref' |
+		'Content' | 'Op' | 'Root'
 	)
 	export type WithChildrenTypeString = 'Array' | 'Dictionary' | 'Indirect' | 'Stream' | 'Content' | 'Root'
 
@@ -80,9 +81,9 @@ export namespace Model {
 	}
 
 	abstract class PdfObjectBase {
-		collection: Model.Collection
+		collection: Collection
 		uid: number
-		constructor (collection: Model.Collection, uid: number) {
+		constructor (collection: Collection, uid: number) {
 			this.collection = collection
 			this.uid = uid
 		}
@@ -162,7 +163,7 @@ export namespace Model {
 
 	export class PdfObjectBytes extends PdfObjectBase implements PdfObjectWithValue {
 		readonly type: TypeString = 'Bytes'
-		protected _value: number[] = []
+		protected _value: Uint8Array = new Uint8Array(0)
 		get value () {
 			return this._value
 		}
@@ -290,9 +291,10 @@ export namespace Model {
 
 	export class PdfObjectStream extends PdfObjectBase implements PdfObjectWithChildren {
 		readonly type: TypeString = 'Stream'
-		children: Map<'dictionary' | 'direct', PdfObjectDictionary | PdfObjectContent | PdfObjectArray | PdfObjectText> = new Map()
+		children: Map<'dictionary' | 'direct', PdfObjectDictionary | PdfObjectContent | PdfObjectArray | PdfObjectText | PdfObjectBytes> = new Map()
 		sourceLocation: { start: number, end: number } | null = null
-		get dictionary (): PdfObjectDictionary {
+		decodedBytes: Uint8Array | null = null
+		get dictionary (): PdfObjectDictionary | null {
 			return this.children.get('dictionary') as PdfObjectDictionary || null
 		}
 		set dictionary (obj) {
@@ -303,8 +305,8 @@ export namespace Model {
 				this.children.delete('dictionary')
 			}
 		}
-		get direct (): PdfObjectContent | PdfObjectArray | PdfObjectText {
-			return this.children.get('direct') as PdfObjectContent | PdfObjectArray | PdfObjectText || null
+		get direct (): PdfObjectContent | PdfObjectArray | PdfObjectText | PdfObjectBytes | null {
+			return this.children.get('direct') as PdfObjectContent | PdfObjectArray | PdfObjectText | PdfObjectBytes || null
 		}
 		set direct (obj) {
 			if (obj) {
@@ -321,10 +323,9 @@ export namespace Model {
 		}
 	}
 
-	export class PdfObjectContent extends PdfObjectBase implements PdfObjectWithValue {
-		readonly type: TypeString = 'Content'
-		// @TODO
-		protected _value: any[] = []
+	export class PdfObjectXref extends PdfObjectBase implements PdfObjectWithValue {
+		readonly type: TypeString = 'Xref'
+		protected _value: any = null
 		get value () {
 			return this._value
 		}
@@ -336,43 +337,53 @@ export namespace Model {
 		}
 	}
 
+	export class PdfObjectContent extends PdfObjectArray {
+		readonly type: TypeString = 'Content'
+	}
+
+	export class PdfObjectOp extends PdfObjectName {
+		readonly type: TypeString = 'Op'
+	}
+
 	export class PdfObjectRoot extends PdfObjectArray {
 		readonly type: TypeString = 'Root'
 	}
 
 	export const PdfObjectType = {
-		Null: PdfObjectNull,
-		Boolean: PdfObjectBoolean,
-		Integer: PdfObjectInteger,
-		Real: PdfObjectReal,
-		Text: PdfObjectText,
-		Bytes: PdfObjectBytes,
-		Date: PdfObjectDate,
-		Name: PdfObjectName,
 		Array: PdfObjectArray,
+		Boolean: PdfObjectBoolean,
+		Bytes: PdfObjectBytes,
+		Content: PdfObjectContent,
+		Date: PdfObjectDate,
 		Dictionary: PdfObjectDictionary,
 		Indirect: PdfObjectIndirect,
+		Integer: PdfObjectInteger,
+		Name: PdfObjectName,
+		Null: PdfObjectNull,
+		Op: PdfObjectOp,
+		Real: PdfObjectReal,
 		Ref: PdfObjectRef,
+		Root: PdfObjectRoot,
 		Stream: PdfObjectStream,
-		Content: PdfObjectContent,
-		Root: PdfObjectRoot
+		Text: PdfObjectText,
+		Xref: PdfObjectXref
 	}
 
 	export namespace PdfObjectType {
-		export type Null = PdfObjectNull
-		export type Boolean = PdfObjectBoolean
-		export type Integer = PdfObjectInteger
-		export type Real = PdfObjectReal
-		export type Text = PdfObjectText
-		export type Bytes = PdfObjectBytes
-		export type Date = PdfObjectDate
-		export type Name = PdfObjectName
 		export type Array = PdfObjectArray
+		export type Boolean = PdfObjectBoolean
+		export type Bytes = PdfObjectBytes
+		export type Content = PdfObjectContent
+		export type Date = PdfObjectDate
 		export type Dictionary = PdfObjectDictionary
 		export type Indirect = PdfObjectIndirect
+		export type Integer = PdfObjectInteger
+		export type Name = PdfObjectName
+		export type Null = PdfObjectNull
+		export type Real = PdfObjectReal
 		export type Ref = PdfObjectRef
-		export type Stream = PdfObjectStream
-		export type Content = PdfObjectContent
 		export type Root = PdfObjectRoot
+		export type Stream = PdfObjectStream
+		export type Text = PdfObjectText
 	}
 }

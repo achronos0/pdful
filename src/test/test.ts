@@ -1,8 +1,7 @@
 
 import fs from 'node:fs/promises'
-import { createEngine } from '../main.js'
+import { createEngine, io } from '../node.js'
 import { PrintObjectTreeOptions, printObjectTree } from '../lib/debug.js'
-import type { Reader } from '../lib/components/reader.js'
 
 // Constants
 const TEST_FILE = 'input/1.pdf'
@@ -14,24 +13,25 @@ const PRINT_OBJECTS_OPTIONS: PrintObjectTreeOptions = {
 
 // Init components
 const engine = createEngine()
-const parser = new engine.Parser({ engine })
+const parser = new engine.parser.Parser({ engine })
 
 // Init reader
-let reader: Reader.ReaderPair
+let reader: io.ReaderPair
 if (TEST_BUFFER) {
 	const buffer = await fs.readFile(TEST_FILE)
 	const bytes = Uint8Array.from(buffer)
-	reader = engine.Reader.createReaderFromArray(bytes)
+	reader = engine.io.createReaderFromArray(bytes)
 }
 else {
 	const fileHandle = await fs.open(TEST_FILE, 'r')
-	reader = await engine.Reader.createReaderFromFileHandle(fileHandle)
+	reader = await engine.io.createReaderFromFileHandle(fileHandle)
 }
 
 // Parse
-const { objectCollection, warnings } = await parser.run(reader)
+const { pdfVersion, objectCollection, warnings } = await parser.run(reader)
 
 // Report results
+console.log('pdfVersion: ', pdfVersion)
 if (PRINT_OBJECTS) {
 	printObjectTree(objectCollection.root, PRINT_OBJECTS_OPTIONS)
 }
