@@ -28,12 +28,12 @@ else {
 }
 
 // Parse
-const { pdfVersion, objectCollection, warnings } = await parser.run(reader)
+const { pdfVersion, collection, warnings } = await parser.run(reader)
 
 // Report results
 console.log('pdfVersion: ', pdfVersion)
 if (PRINT_OBJECTS) {
-	printObjectTree(objectCollection.root, PRINT_OBJECTS_OPTIONS)
+	printObjectTree(collection.root, PRINT_OBJECTS_OPTIONS)
 }
 if (warnings.length) {
 	console.error('Parser warnings:')

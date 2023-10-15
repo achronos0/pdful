@@ -22,24 +22,24 @@ export namespace parser {
 		async run (reader: io.ReaderPair) {
 			const sequentialReader = reader.sequentialReader
 			const offsetReader = reader.offsetReader
-			const objectCollection = new this.engine.model.Collection()
+			const collection = new this.engine.model.Collection()
 			const warnings: PdfError[] = []
-			const pdfVersion = await this.parseDocument({ sequentialReader, objectCollection, warnings })
-			await this.decodeAllStreams({ offsetReader, objectCollection, warnings })
-			return { pdfVersion, objectCollection, warnings }
+			const pdfVersion = await this.parseDocumentData({ sequentialReader, collection, warnings })
+			await this.resolveRefs(collection)
+			await this.resolveStreamTypes(collection)
+			await this.parseStreams({ offsetReader, collection, warnings })
+			await this.resolveRefs(collection)
+			return { pdfVersion, collection, warnings }
 		}
 
-		async parseDocument (config: {
+		async parseDocumentData (config: {
 			sequentialReader: io.SequentialReader,
-			objectCollection: model.Collection,
+			collection: model.Collection,
 			warnings: PdfError[]
 		}) {
 			const sequentialReader = config.sequentialReader
-			const objectCollection = config.objectCollection
+			const collection = config.collection
 			const warnings = config.warnings
-			const engine = this.engine
-			const rootObject = objectCollection.root
-			const tokenizer = new this.engine.tokenizer.Tokenizer({ engine, sequentialReader, warnings })
 
 			if (sequentialReader.length < 0xFF) {
 				throw new PdfError('Not a PDF: File size is too small', 'parser:not_pdf:filesize')
@@ -68,30 +68,21 @@ export namespace parser {
 				warnings.push(new PdfError(`Unsupported PDF version: ${pdfVersion}`, 'parser:unsupported_version', { pdfVersion }))
 			}
 
-			const lexer = new this.engine.lexer.Lexer({ engine, objectCollection, warnings })
-			await this._parseData({ tokenizer, lexer, rootObject })
-			this.resolveRefs(objectCollection)
+			const xrefObj = collection.createObject(this.engine.model.ObjType.Xref)
+			collection.root.push(xrefObj)
+
+			const engine = this.engine
+			const tokenizer = new this.engine.tokenizer.Tokenizer({ engine, sequentialReader, warnings })
+			const lexer = new this.engine.lexer.Lexer({ engine, collection, warnings })
+			const stack = [collection.root, xrefObj]
+			await this._parseObjectData({ tokenizer, lexer, stack })
 			return pdfVersion
 		}
 
-		async decodeAllStreams (config: {
-			offsetReader: io.OffsetReader,
-			objectCollection: model.Collection,
-			warnings: PdfError[]
-		}) {
-			const offsetReader = config.offsetReader
-			const objectCollection = config.objectCollection
-			const warnings = config.warnings
-			for (const streamObject of objectCollection.streams.values()) {
-				await this.decodeStreamObject({ streamObject, offsetReader, warnings })
-			}
-			this.resolveRefs(objectCollection)
-		}
-
-		resolveRefs (objectCollection: model.Collection) {
-			for (const ref of objectCollection.refs.values()) {
+		async resolveRefs (collection: model.Collection) {
+			for (const ref of collection.refs.values()) {
 				if (ref.identifier && !ref.indirect) {
-					const obj = objectCollection.identifier(ref.identifier)
+					const obj = collection.identifier(ref.identifier)
 					if (obj) {
 						ref.indirect = obj
 					}
@@ -99,22 +90,87 @@ export namespace parser {
 			}
 		}
 
-		async decodeStreamObject (config: {
-			streamObject: model.PdfObjectType.Stream,
+		async resolveStreamTypes (collection: model.Collection) {
+			for (const streamObj of collection.streams.values()) {
+				const dictObj = streamObj.dictionary
+				if (!dictObj) {
+					continue
+				}
+				let type: string | null = null
+				const typeObj = dictObj.children.get('Type')
+				if (typeObj instanceof this.engine.model.ObjType.Name) {
+					type = typeObj.value
+				}
+				let subtype: string | null = null
+				const subtypeObj = dictObj.children.get('Subtype') || dictObj.children.get('S') || null
+				if (subtypeObj instanceof this.engine.model.ObjType.Name) {
+					subtype = subtypeObj.value
+				}
+				if (!type && subtype && ['Form', 'Image'].includes(subtype)) {
+					type = 'XObject'
+				}
+				if (!type) {
+					continue
+				}
+				if (subtype) {
+					type += '/' + subtype
+				}
+				streamObj.streamType = type
+			}
+		}
+
+		async parseStreams (config: {
+			offsetReader: io.OffsetReader,
+			collection: model.Collection,
+			warnings: PdfError[]
+		}) {
+			const offsetReader = config.offsetReader
+			const collection = config.collection
+			const warnings = config.warnings
+			for (const streamObj of collection.streams.values()) {
+				const streamType = streamObj.streamType
+				if (!streamType) {
+					continue
+				}
+				const bytes = await this.decodeStreamObj({ streamObj, offsetReader, warnings })
+				switch (streamType) {
+					case 'Content':
+						await this.parseContentStreamObj({ streamObj, bytes, warnings })
+						break
+					case 'XObject/Form':
+						await this.parseContentStreamObj({ streamObj, bytes, warnings })
+						break
+					case 'XObject/Image':
+						await this.parseImageStreamObj({ streamObj, bytes, warnings })
+						break
+					case 'ObjStm':
+						await this.parseObjectStreamObj({ streamObj, bytes, warnings })
+						break
+					case 'XRef':
+						await this.parseXrefStreamObj({ streamObj, bytes, warnings })
+						break
+					default:
+						await this.parseBinaryStreamObj({ streamObj, bytes, warnings })
+				}
+			}
+		}
+
+		async decodeStreamObj (config: {
+			streamObj: model.ObjType.Stream,
 			offsetReader: io.OffsetReader,
 			warnings: PdfError[]
 		}) {
-			const streamObject = config.streamObject
+			const streamObj = config.streamObj
 			const offsetReader = config.offsetReader
 			const warnings = config.warnings
 
-			const dictObj = streamObject.dictionary
-			if (!dictObj || !streamObject.sourceLocation) {
-				return
+			const dictObj = streamObj.dictionary
+			const sourceLocation = streamObj.sourceLocation
+			if (!dictObj || !sourceLocation) {
+				return new Uint8Array(0)
 			}
 
-			const sourceLocation = streamObject.sourceLocation
-			const dictData = dictObj.getAsObject()
+			const dictData = dictObj.getChildrenValue()
 			if (dictData.F) {
 				throw new PdfError(`@TODO: Not implemented: Stream resource specifies an external file`, 'lexer:not_implemented:stream:file', { type: 'Stream', notImplemented: true })
 			}
@@ -155,7 +211,7 @@ export namespace parser {
 				catch (err: any) {
 					if (err instanceof PdfError) {
 						warnings.push(err)
-						bytes = new Uint8Array(0)
+						return new Uint8Array(0)
 					}
 					else {
 						throw err
@@ -163,58 +219,95 @@ export namespace parser {
 				}
 			}
 
-			console.log(bytes)
-			// streamObject.decodedBytes = bytes
-
-			/*
-			const objectCollection = config.objectCollection
-			const engine = this.engine
-			const lexer = new engine.Lexer({ engine, objectCollection, warnings })
-
-			let binary = false
-			for (const val of bytes.subarray(0, 64)) {
-				if (val < 9 || val > 127) {
-					binary = true
-					break
-				}
-			}
-			if (binary) {
-				const directObj = lexer.createObject(engine.model.PdfObjectType.Bytes)
-				directObj.value = bytes
-				streamObject.direct = directObj
-			}
-			else {
-				const sequentialReader = new engine.io.SequentialMemoryReader(bytes)
-				const tokenizer = new engine.Tokenizer({ engine, sequentialReader, warnings })
-				const rootObject = lexer.createObject(engine.model.PdfObjectType.Array)
-				await this._parseData({ tokenizer, lexer, rootObject })
-
-				let directObj: model.PdfObjectType.Array | model.PdfObjectType.Content | model.PdfObjectType.Text
-				const firstChildObj = rootObject.children.get(0)
-				if (rootObject.children.size === 1 && firstChildObj instanceof engine.model.PdfObjectType.Text) {
-					directObj = firstChildObj
-				}
-				else if (firstChildObj instanceof engine.model.PdfObjectType.Indirect) {
-					directObj = rootObject
-				}
-				else {
-					directObj = lexer.createObject(engine.model.PdfObjectType.Content)
-					directObj.children = rootObject.children
-				}
-				streamObject.direct = directObj
-			}
-			*/
+			return bytes
 		}
 
-		protected async _parseData (config: {
+		async parseContentStreamObj (config: {
+			streamObj: model.ObjType.Stream,
+			bytes: Uint8Array,
+			warnings: PdfError[]
+		}) {
+			const streamObj = config.streamObj
+			const bytes = config.bytes
+			const warnings = config.warnings
+			const collection = streamObj.collection
+
+			const obj = collection.createObject(this.engine.model.ObjType.Content)
+			streamObj.direct = obj
+
+			const engine = this.engine
+			const lexer = new engine.lexer.Lexer({ engine, collection, warnings })
+			const sequentialReader = new engine.io.SequentialMemoryReader(bytes)
+			const tokenizer = new this.engine.tokenizer.Tokenizer({ engine, sequentialReader, warnings })
+			const stack = [obj]
+			await this._parseObjectData({ tokenizer, lexer, stack })
+
+			return obj
+		}
+
+		async parseObjectStreamObj (config: {
+			streamObj: model.ObjType.Stream,
+			bytes: Uint8Array,
+			warnings: PdfError[]
+		}) {
+			// const streamObj = config.streamObj
+			// const bytes = config.bytes
+			// const warnings = config.warnings
+			// const collection = streamObj.collection
+
+			// @TODO
+			throw new Error('@TODO parser temp debug stop: found object stream')
+		}
+
+		async parseXrefStreamObj (config: {
+			streamObj: model.ObjType.Stream,
+			bytes: Uint8Array,
+			warnings: PdfError[]
+		}) {
+			// const streamObj = config.streamObj
+			// const bytes = config.bytes
+			// const warnings = config.warnings
+			// const collection = streamObj.collection
+
+			// @TODO
+			throw new Error('@TODO parser temp debug stop: found xref stream')
+		}
+
+		async parseImageStreamObj (config: {
+			streamObj: model.ObjType.Stream,
+			bytes: Uint8Array,
+			warnings: PdfError[]
+		}) {
+			const streamObj = config.streamObj
+			const bytes = config.bytes
+			const warnings = config.warnings
+			await this.parseBinaryStreamObj({ streamObj, bytes, warnings })
+		}
+
+		async parseBinaryStreamObj (config: {
+			streamObj: model.ObjType.Stream,
+			bytes: Uint8Array,
+			warnings: PdfError[]
+		}): Promise<model.ObjType.Bytes> {
+			const streamObj = config.streamObj
+			const bytes = config.bytes
+			// const warnings = config.warnings
+			const collection = streamObj.collection
+
+			const obj = collection.createObject(this.engine.model.ObjType.Bytes)
+			streamObj.direct = obj
+			obj.value = bytes
+			return obj
+		}
+
+		protected async _parseObjectData (config: {
 			tokenizer: tokenizer.Tokenizer,
 			lexer: lexer.Lexer,
-			rootObject: model.PdfObjectWithChildren,
+			stack: model.ObjWithChildren[],
 		}) {
 			const tokenizer = config.tokenizer
 			const lexer = config.lexer
-			const rootObject = config.rootObject
-			lexer.start(rootObject)
+			lexer.stack = config.stack
 			const tokenGenerator = tokenizer.tokens()
 			for await (const token of tokenGenerator) {
 				lexer.pushToken(token)

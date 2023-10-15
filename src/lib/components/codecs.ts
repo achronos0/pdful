@@ -20,7 +20,7 @@ export namespace codecs {
 					bytes = pako.inflate(bytes)
 					break
 				default:
-					throw new PdfError(`@TODO: Not supported: Unsupported stream filter ${filter}`, 'parser:not_implemented:stream:filter', { type: 'Stream', notImplemented: true, filter })
+					throw new PdfError(`@TODO: Not supported: Unsupported stream filter ${filter.name}`, 'parser:not_implemented:stream:filter', { type: 'Stream', notImplemented: true, filter })
 			}
 		}
 		return bytes

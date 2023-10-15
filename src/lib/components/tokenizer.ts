@@ -190,19 +190,27 @@ export namespace tokenizer {
 				const strParts = []
 				let depth = 1
 				while (depth && !this.reader.eof) {
-					const raw = await this.reader.readStringUntil(this.engine.constants.TOKEN_BYTE_PAREN, true)
-					if (raw.substring(raw.length - 1) === '(') {
-						depth++
-						strParts.push(raw)
-					}
-					else {
-						depth--
-						if (depth) {
+					const raw = await this.reader.readStringUntil(this.engine.constants.TOKEN_BYTE_STRINGPAREN, true)
+					const char = raw.substring(raw.length - 1)
+					switch (char) {
+						case '\\': {
 							strParts.push(raw)
+							const next = await this.reader.readChar(true)
+							strParts.push(next)
+							break
 						}
-						else {
-							strParts.push(raw.substring(0, raw.length - 1))
-						}
+						case '(':
+							depth++
+							strParts.push(raw)
+							break
+						default: // ')'
+							depth--
+							if (depth) {
+								strParts.push(raw)
+							}
+							else {
+								strParts.push(raw.substring(0, raw.length - 1))
+							}
 					}
 				}
 				if (depth) {

@@ -47,8 +47,8 @@ export namespace literals {
 		get TOKEN_BYTE_NAME () {
 			return [...this.byteCharRange('!', '~', '%()[]<>')]
 		}
-		get TOKEN_BYTE_PAREN () {
-			return [this.byteChar('('), this.byteChar(')')]
+		get TOKEN_BYTE_STRINGPAREN () {
+			return [this.byteChar('('), this.byteChar(')'), this.byteChar('\\')]
 		}
 		get TOKEN_BYTE_DIGIT () {
 			return [...this.byteCharRange('0', '9', '')]

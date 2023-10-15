@@ -14,166 +14,165 @@ import type { tokenizer } from './tokenizer.js'
 export namespace lexer {
 	export class Lexer {
 		readonly engine: engine.Engine
-		readonly objectCollection: model.Collection
+		readonly collection: model.Collection
 		readonly warnings: PdfError[]
 		readonly decoders = {
 			latin1: new TextDecoder('latin1'),
 			utf16be: new TextDecoder('utf-16be'),
 			utf8: new TextDecoder('utf-8')
 		}
-		stack: model.PdfObjectWithChildren[] = []
+		stack: model.ObjWithChildren[] = []
 		pendingDictionaryKey: string | null = null
+		pendingXrefTable: tokenizer.TokenXref | null = null
+		pendingTrailer: true | model.ObjType.Dictionary | null = null
 
 		constructor (config: {
 			engine: engine.Engine,
-			objectCollection: model.Collection,
+			collection: model.Collection,
 			warnings: PdfError[]
 		}) {
 			this.engine = config.engine
-			this.objectCollection = config.objectCollection
+			this.collection = config.collection
 			this.warnings = config.warnings
 		}
 
-		start (rootObject: model.PdfObjectWithChildren) {
-			this.stack = [rootObject]
-		}
-
-		pushToken (token: tokenizer.Token) {
+		pushToken (token: tokenizer.Token): model.Obj | null {
 			switch (token.type) {
 				case 'space':
 					// ignore
-					break
-				case 'comment':
-					// ignore
-					break
-				case 'junk':
-					// ignore
-					break
-				case 'null': {
-					const obj = this.createObject(this.engine.model.PdfObjectType.Null)
+					return null
+				case 'comment': {
+					const obj = this.collection.createObject(this.engine.model.ObjType.Comment)
+					obj.value = token.value
 					this.insertObject(obj, token)
-					break
+					return obj
+				}
+				case 'junk': {
+					const obj = this.collection.createObject(this.engine.model.ObjType.Junk)
+					obj.value = token.value
+					this.insertObject(obj, token)
+					return obj
+				}
+				case 'null': {
+					const obj = this.collection.createObject(this.engine.model.ObjType.Null)
+					this.insertObject(obj, token)
+					return obj
 				}
 				case 'boolean': {
-					const obj = this.createObject(this.engine.model.PdfObjectType.Boolean)
+					const obj = this.collection.createObject(this.engine.model.ObjType.Boolean)
 					obj.value = token.value
 					this.insertObject(obj, token)
-					break
+					return obj
 				}
 				case 'integer': {
-					const obj = this.createObject(this.engine.model.PdfObjectType.Integer)
+					const obj = this.collection.createObject(this.engine.model.ObjType.Integer)
 					obj.value = token.value
 					this.insertObject(obj, token)
-					break
+					return obj
 				}
 				case 'real': {
-					const obj = this.createObject(this.engine.model.PdfObjectType.Real)
+					const obj = this.collection.createObject(this.engine.model.ObjType.Real)
 					obj.value = token.value
 					this.insertObject(obj, token)
-					break
+					return obj
 				}
 				case 'string': {
 					const obj = this.createStringObject('string', token.value)
 					this.insertObject(obj, token)
-					break
+					return obj
 				}
 				case 'hexstring': {
 					const obj = this.createStringObject('hexstring', token.value)
 					this.insertObject(obj, token)
-					break
+					return obj
 				}
 				case 'name': {
-					const obj = this.createObject(this.engine.model.PdfObjectType.Name)
+					const obj = this.collection.createObject(this.engine.model.ObjType.Name)
 					obj.value = token.value
 					this.insertObject(obj, token)
-					break
+					return obj
 				}
 				case 'array_start': {
-					const obj = this.createObject(this.engine.model.PdfObjectType.Array)
+					const obj = this.collection.createObject(this.engine.model.ObjType.Array)
 					this.insertObject(obj, token)
 					this.pushStack(obj)
-					break
+					return obj
 				}
 				case 'array_end': {
 					this.popStack('Array', token)
-					break
+					return null
 				}
 				case 'dictionary_start': {
-					const obj = this.createObject(this.engine.model.PdfObjectType.Dictionary)
+					const obj = this.collection.createObject(this.engine.model.ObjType.Dictionary)
 					this.insertObject(obj, token)
 					this.pushStack(obj)
-					break
+					return obj
 				}
 				case 'dictionary_end': {
 					this.popStack('Dictionary', token)
-					break
+					return null
 				}
 				case 'indirect_start': {
-					const obj = this.createObject(this.engine.model.PdfObjectType.Indirect)
+					const obj = this.collection.createObject(this.engine.model.ObjType.Indirect)
 					obj.identifier = token.value
-					this.objectCollection.addObject(obj)
+					this.collection.addObject(obj)
 					this.insertObject(obj, token)
 					this.pushStack(obj)
-					break
+					return obj
 				}
 				case 'indirect_end': {
 					this.popStack('Indirect', token)
-					break
+					return null
 				}
 				case 'ref': {
-					const obj = this.createObject(this.engine.model.PdfObjectType.Ref)
+					const obj = this.collection.createObject(this.engine.model.ObjType.Ref)
 					obj.identifier = token.value
 					this.insertObject(obj, token)
-					break
+					return obj
 				}
 				case 'stream': {
-					let dictObj: model.PdfObjectType.Dictionary | null = null
+					let dictObj: model.ObjType.Dictionary | null = null
 					{
 						const parent = this.stack[this.stack.length - 1]
-						if (!(parent instanceof this.engine.model.PdfObjectType.Indirect)) {
+						if (!(parent instanceof this.engine.model.ObjType.Indirect)) {
 							this.warnings.push(new PdfError(`Stream is not an indirect object at offset ${token.start}`, 'lexer:invalid_token:stream:not_indirect', { type: 'Stream', token }))
 							break
 						}
-						if (!(parent.direct instanceof this.engine.model.PdfObjectType.Dictionary)) {
+						if (!(parent.direct instanceof this.engine.model.ObjType.Dictionary)) {
 							this.warnings.push(new PdfError(`Stream is missing dictionary at offset ${token.start}`, 'lexer:invalid_token:stream:missing_dictionary', { type: 'Stream', token }))
 							break
 						}
 						dictObj = parent.direct
 						parent.direct = null
 					}
-					const obj = this.createObject(this.engine.model.PdfObjectType.Stream)
+					const obj = this.collection.createObject(this.engine.model.ObjType.Stream)
 					obj.sourceLocation = {
 						start: token.value.start,
 						end: token.value.end
 					}
 					obj.dictionary = dictObj
 					this.insertObject(obj, token)
-					break
+					return obj
 				}
 				case 'xref': {
-					const obj = this.createObject(this.engine.model.PdfObjectType.Xref)
-					obj.value = token.value
-					this.insertObject(obj, token)
-					break
+					this.pendingXrefTable = token
+					return null
 				}
 				case 'trailer': {
-					// @TODO
-					break
+					this.pendingTrailer = true
+					return null
 				}
 				case 'eof':
-					// @TODO
-					break
+					this.popStack('Xref', token)
+					return null
 				case 'op': {
-					const obj = this.createObject(this.engine.model.PdfObjectType.Op)
+					const obj = this.collection.createObject(this.engine.model.ObjType.Op)
 					obj.value = token.value
 					this.insertObject(obj, token)
-					break
+					return obj
 				}
 			}
-		}
-
-		createObject <T extends model.PdfObjectConstructor>(Type: T): InstanceType<T> {
-			return this.objectCollection.createObject(Type)
+			return null
 		}
 
 		/**
@@ -185,9 +184,12 @@ export namespace lexer {
 		 * @param data string byte int array
 		 * @returns pdf object
 		 */
-		createStringObject (tokenType: 'string' | 'hexstring', data: number[]): model.PdfObjectType.Text | model.PdfObjectType.Bytes | model.PdfObjectType.Date {
+		createStringObject (
+			tokenType: 'string' | 'hexstring',
+			data: number[]
+		): model.ObjType.Text | model.ObjType.Bytes | model.ObjType.Date {
 			const createTextObject = (value: string, encoding: 'pdf' | 'utf-8' | 'utf-16be') => {
-				const obj = this.createObject(this.engine.model.PdfObjectType.Text)
+				const obj = this.collection.createObject(this.engine.model.ObjType.Text)
 				obj.value = value
 				obj.tokenType = tokenType
 				obj.encoding = encoding
@@ -233,7 +235,7 @@ export namespace lexer {
 						const tzOffset = offsetSign === 'Z' ? 'Z' : `${offsetSign}${offsetHours}:${offsetMins}`
 						const date = new Date(`${year}-${month}-${day}T${hours}:${mins}:${secs}${tzOffset}`)
 
-						const obj = this.createObject(this.engine.model.PdfObjectType.Date)
+						const obj = this.collection.createObject(this.engine.model.ObjType.Date)
 						obj.value = date
 						return obj
 					}
@@ -252,7 +254,7 @@ export namespace lexer {
 
 			// Handle byte string
 			if (tokenType === 'hexstring') {
-				const obj = this.createObject(this.engine.model.PdfObjectType.Bytes)
+				const obj = this.collection.createObject(this.engine.model.ObjType.Bytes)
 				obj.value = Uint8Array.from(data)
 				return obj
 			}
@@ -269,13 +271,27 @@ export namespace lexer {
 			return createTextObject(str, 'pdf')
 		}
 
-		insertObject (obj: model.PdfObject, token: tokenizer.Token) {
+		insertObject (obj: model.Obj, token: tokenizer.Token) {
+			if (this.pendingTrailer && obj instanceof this.engine.model.ObjType.Dictionary) {
+				this.pendingTrailer = obj
+				return
+			}
 			const parent = this.stack[this.stack.length - 1]
-			if (parent instanceof this.engine.model.PdfObjectType.Array || parent instanceof this.engine.model.PdfObjectType.Root) {
+			if (parent instanceof this.engine.model.ObjType.Root) {
+				const xrefObj = this.collection.createObject(this.engine.model.ObjType.Xref)
+				parent.push(xrefObj)
+				xrefObj.push(obj)
+				return
+			}
+			if (
+				parent instanceof this.engine.model.ObjType.Array ||
+				parent instanceof this.engine.model.ObjType.Content ||
+				parent instanceof this.engine.model.ObjType.Xref
+			) {
 				parent.push(obj)
 				return
 			}
-			if (parent instanceof this.engine.model.PdfObjectType.Dictionary) {
+			if (parent instanceof this.engine.model.ObjType.Dictionary) {
 				if (this.pendingDictionaryKey != null) {
 					parent.children.set(this.pendingDictionaryKey, obj)
 					this.pendingDictionaryKey = null
@@ -289,7 +305,7 @@ export namespace lexer {
 				this.pendingDictionaryKey = ''
 				return
 			}
-			if (parent instanceof this.engine.model.PdfObjectType.Indirect) {
+			if (parent instanceof this.engine.model.ObjType.Indirect) {
 				if (!parent.direct) {
 					parent.direct = obj
 					return
@@ -297,19 +313,19 @@ export namespace lexer {
 				this.warnings.push(new PdfError(`Multiple direct objects inside indirect object at offset ${token.start}`, `lexer:invalid_token:${token.type}:multiple_children`, { type: 'Indirect', token, child: obj, parent }))
 				return
 			}
-			throw new Error('invalid parent')
+			throw new Error(`parser code error: invalid parent: ${parent.type}`)
 		}
 
-		pushStack (obj: model.PdfObjectWithChildren) {
+		pushStack (obj: model.ObjWithChildren) {
 			this.stack.push(obj)
 		}
 
-		popStack (type: model.WithChildrenTypeString, token: tokenizer.Token) {
-			if (this.stack.length < 2) {
+		popStack (type: model.ObjWithChildrenTypeString, token: tokenizer.Token) {
+			if (this.stack.length <= 1) {
 				this.warnings.push(new PdfError(`Junk ${type} end token at offset ${token.start}`, `lexer:invalid_token:${token.type}:missing_start`, { type, token }))
 				return
 			}
-			const parent = this.stack.pop() as model.PdfObject
+			let parent = this.stack.pop() as model.Obj
 			if (this.pendingDictionaryKey) {
 				this.pendingDictionaryKey = null
 				this.warnings.push(new PdfError(`Dictionary object is missing final value at offset ${token.start}`, `lexer:invalid_token:${token.type}:missing_value`, { type: 'Dictionary', object: parent, token }))
@@ -318,11 +334,22 @@ export namespace lexer {
 				this.warnings.push(new PdfError(`Unterminated ${parent.type} object at offset ${token.start}`, `lexer:invalid_token:${parent.type}:missing_end`, { type: parent.type, object: parent, token }))
 				// keep popping objects until we pop one that matches the end token we got
 				while (this.stack.length > 1) {
-					const parent = this.stack.pop() as model.PdfObject
+					parent = this.stack.pop() as model.Obj
 					if (parent.type === type) {
 						break
 					}
 				}
+			}
+			if (parent instanceof this.engine.model.ObjType.Xref) {
+				if (this.pendingXrefTable) {
+					parent.xrefTable = this.pendingXrefTable.value
+				}
+				if (this.pendingTrailer instanceof this.engine.model.ObjType.Dictionary) {
+					parent.trailer = this.pendingTrailer
+				}
+				parent.startxref = (token as tokenizer.TokenEof).value
+				this.pendingXrefTable = null
+				this.pendingTrailer = null
 			}
 		}
 	}

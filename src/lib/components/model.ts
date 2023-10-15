@@ -5,46 +5,71 @@
  */
 
 export namespace model {
-	export interface PdfObject {
-		type: TypeString
+	export interface Obj {
+		type: ObjTypeString
 		collection: Collection
 		uid: number
 		getData (): unknown
 	}
-	export interface PdfObjectWithValue extends PdfObject {
+	export interface ObjWithValue extends Obj {
 		value: unknown
 	}
-	export interface PdfObjectWithChildren extends PdfObject {
-		children: Map<string | number, PdfObject>
+	export interface ObjWithChildren extends Obj {
+		children: Map<string | number, Obj>
 	}
-	export interface PdfObjectConstructor {
-		new (collection: Collection, uid: number): PdfObject
+	export interface ObjConstructor {
+		new (collection: Collection, uid: number): Obj
 	}
+
+	export type ObjTypeString = (
+		'Array' |
+		'Boolean' |
+		'Bytes' |
+		'Comment' |
+		'Content' |
+		'Date' |
+		'Dictionary' |
+		'Indirect' |
+		'Integer' |
+		'Junk' |
+		'Name' |
+		'Null' |
+		'Op' |
+		'Real' |
+		'Ref' |
+		'Root' |
+		'Stream' |
+		'Text' |
+		'Xref'
+	)
+	export type ObjWithChildrenTypeString = (
+		'Array' |
+		'Content' |
+		'Dictionary' |
+		'Indirect' |
+		'Root' |
+		'Stream' |
+		'Xref'
+	)
+
 	export interface IndirectIdentifier {
 		num: number,
 		gen: number
 	}
 
-	export type TypeString = (
-		'Null' | 'Boolean' | 'Integer' | 'Real' | 'Text' | 'Bytes' | 'Date' | 'Name' |
-		'Array' | 'Dictionary' | 'Indirect' | 'Ref' | 'Stream' | 'Xref' |
-		'Content' | 'Op' | 'Root'
-	)
-	export type WithChildrenTypeString = 'Array' | 'Dictionary' | 'Indirect' | 'Stream' | 'Content' | 'Root'
-
 	export class Collection {
 		static maxUid = 0
-		readonly root: PdfObjectRoot
-		objects: Map<number, PdfObject> = new Map()
-		indirects: Map<string, PdfObjectIndirect> = new Map()
-		refs: Set<PdfObjectRef> = new Set()
-		streams: Set<PdfObjectStream> = new Set()
+		readonly root: RootObj
+		objects: Map<number, Obj> = new Map()
+		indirects: Map<string, IndirectObj> = new Map()
+		refs: Set<RefObj> = new Set()
+		streams: Set<StreamObj> = new Set()
 
 		constructor () {
-			this.root = this.createObject(PdfObjectRoot)
+			this.root = this.createObject(RootObj)
 		}
 
-		uid (uid: number): PdfObject {
+		uid (uid: number): Obj {
 			const obj = this.objects.get(uid)
 			if (!obj) {
 				throw new Error(`Object not found: uid ${uid}`)
@@ -58,29 +83,29 @@ export namespace model {
 			return obj || null
 		}
 
-		createObject <T extends PdfObjectConstructor>(Type: T): InstanceType<T> {
+		createObject <T extends ObjConstructor>(Type: T): InstanceType<T> {
 			const obj = new Type(this, ++Collection.maxUid)
 			this.addObject(obj)
 			return obj as InstanceType<T>
 		}
 
-		addObject (obj: PdfObject) {
+		addObject (obj: Obj) {
 			obj.collection = this
 			this.objects.set(obj.uid, obj)
-			if (obj instanceof PdfObjectIndirect && obj.identifier) {
+			if (obj instanceof IndirectObj && obj.identifier) {
 				const key = String(obj.identifier.num) + '/' + String(obj.identifier.gen)
 				this.indirects.set(key, obj)
 			}
-			else if (obj instanceof PdfObjectRef && !this.refs.has(obj)) {
+			else if (obj instanceof RefObj && !this.refs.has(obj)) {
 				this.refs.add(obj)
 			}
-			else if (obj instanceof PdfObjectStream && !this.streams.has(obj)) {
+			else if (obj instanceof StreamObj && !this.streams.has(obj)) {
 				this.streams.add(obj)
 			}
 		}
 	}
 
-	abstract class PdfObjectBase {
+	abstract class ObjBase {
 		collection: Collection
 		uid: number
 		constructor (collection: Collection, uid: number) {
@@ -89,19 +114,64 @@ export namespace model {
 		}
 	}
 
-	export class PdfObjectNull extends PdfObjectBase implements PdfObjectWithValue {
-		readonly type: TypeString = 'Null'
+	abstract class ObjStringValueBase extends ObjBase {
+		protected _value: string = ''
 		get value () {
-			return null
+			return this._value
 		}
-		set value (val) {}
+		set value (val) {
+			this._value = val
+		}
 		getData () {
-			return null
+			return this.value
 		}
 	}
 
-	export class PdfObjectBoolean extends PdfObjectBase implements PdfObjectWithValue {
-		readonly type: TypeString = 'Boolean'
+	abstract class ObjChildListBase extends ObjBase {
+		children: Map<number, Obj> = new Map()
+		get length () {
+			return this.children.size
+		}
+		push (obj: Obj) {
+			const key = this.children.size
+			this.children.set(key, obj)
+		}
+		getChildrenArray () {
+			const data: unknown[] = []
+			for (const [key, obj] of this.children.entries()) {
+				const val = obj.getData()
+				data[key] = val
+			}
+			return data
+		}
+		getChildrenValue (indirects: number[] = []) {
+			const data: unknown[] = []
+			for (const [key, obj] of this.children.entries()) {
+				let val
+				if ('value' in obj) {
+					val = obj.value
+				}
+				else if ('getChildrenValue' in obj && typeof obj.getChildrenValue === 'function') {
+					val = obj.getChildrenValue(indirects)
+				}
+				else {
+					val = null
+				}
+				data[key] = val
+			}
+			return data
+		}
+	}
+
+	class ArrayObj extends ObjChildListBase implements ObjWithChildren {
+		readonly type: ObjTypeString = 'Array'
+		getData () {
+			return this.getChildrenArray()
+		}
+	}
+
+	class BooleanObj extends ObjBase implements ObjWithValue {
+		readonly type: ObjTypeString = 'Boolean'
 		protected _value: boolean = false
 		get value () {
 			return this._value
@@ -114,8 +184,99 @@ export namespace model {
 		}
 	}
 
-	export class PdfObjectInteger extends PdfObjectBase implements PdfObjectWithValue {
-		readonly type: TypeString = 'Integer'
+	class BytesObj extends ObjBase implements ObjWithValue {
+		readonly type: ObjTypeString = 'Bytes'
+		protected _value: Uint8Array = new Uint8Array(0)
+		get value () {
+			return this._value
+		}
+		set value (val) {
+			this._value = val
+		}
+		getData () {
+			return this.value
+		}
+	}
+
+	class CommentObj extends ObjStringValueBase implements ObjWithValue {
+		readonly type: ObjTypeString = 'Comment'
+	}
+
+	class ContentObj extends ObjChildListBase implements ObjWithChildren {
+		readonly type: ObjTypeString = 'Content'
+		getData () {
+			return this.getChildrenArray()
+		}
+	}
+
+	class DateObj extends ObjBase implements ObjWithValue  {
+		readonly type: ObjTypeString = 'Date'
+		protected _value: Date = new Date()
+		get value () {
+			return this._value
+		}
+		set value (val) {
+			this._value = val
+		}
+		getData () {
+			return this.value
+		}
+	}
+
+	class DictionaryObj extends ObjBase implements ObjWithChildren {
+		readonly type: ObjTypeString = 'Dictionary'
+		children: Map<string, Obj> = new Map()
+		getData () {
+			const data: { [key: string]: unknown } = {}
+			for (const [key, obj] of this.children.entries()) {
+				const val = obj.getData()
+				data[key] = val
+			}
+			return data
+		}
+		getChildrenValue (indirects: number[] = []) {
+			const data: { [key: string]: unknown } = {}
+			for (const [key, obj] of this.children.entries()) {
+				let val
+				if ('value' in obj) {
+					val = obj.value
+				}
+				else if ('getChildrenValue' in obj && typeof obj.getChildrenValue === 'function') {
+					val = obj.getChildrenValue(indirects)
+				}
+				else {
+					val = null
+				}
+				data[key] = val
+			}
+			return data
+		}
+	}
+
+	class IndirectObj extends ObjBase implements ObjWithChildren {
+		readonly type: ObjTypeString = 'Indirect'
+		children: Map<'direct', Obj> = new Map()
+		identifier:  IndirectIdentifier | null = null
+		get direct () {
+			return this.children.get('direct') || null
+		}
+		set direct (obj) {
+			if (obj) {
+				this.children.set('direct', obj)
+			}
+			else {
+				this.children.delete('direct')
+			}
+		}
+		getData() {
+			const identifier = this.identifier
+			const direct = this.direct ? this.direct.getData() : null
+			return { identifier, direct }
+		}
+	}
+
+	class IntegerObj extends ObjBase implements ObjWithValue {
+		readonly type: ObjTypeString = 'Integer'
 		protected _value: number = 0
 		get value () {
 			return this._value
@@ -127,8 +288,32 @@ export namespace model {
 			return this.value
 		}
 	}
-	export class PdfObjectReal extends PdfObjectBase implements PdfObjectWithValue {
-		readonly type: TypeString = 'Real'
+
+	class JunkObj extends ObjStringValueBase implements ObjWithValue {
+		readonly type: ObjTypeString = 'Junk'
+	}
+
+	class NameObj extends ObjStringValueBase implements ObjWithValue {
+		readonly type: ObjTypeString = 'Name'
+	}
+
+	class NullObj extends ObjBase implements ObjWithValue {
+		readonly type: ObjTypeString = 'Null'
+		get value () {
+			return null
+		}
+		set value (val) {}
+		getData () {
+			return null
+		}
+	}
+
+	class OpObj extends ObjStringValueBase implements ObjWithValue {
+		readonly type: ObjTypeString = 'Op'
+	}
+
+	class RealObj extends ObjBase implements ObjWithValue {
+		readonly type: ObjTypeString = 'Real'
 		protected _value: number = 0
 		get value () {
 			return this._value
@@ -141,8 +326,96 @@ export namespace model {
 		}
 	}
 
-	export class PdfObjectText extends PdfObjectBase implements PdfObjectWithValue {
-		readonly type: TypeString = 'Text'
+	class RefObj extends ObjBase implements ObjWithChildren {
+		readonly type: ObjTypeString = 'Ref'
+		identifier: null | { num: number, gen: number } = null
+		children: Map<'indirect', IndirectObj> = new Map()
+		get indirect () {
+			return this.children.get('indirect') || null
+		}
+		set indirect (obj) {
+			if (obj) {
+				this.children.set('indirect', obj)
+			}
+			else {
+				this.children.delete('indirect')
+			}
+		}
+		get direct () {
+			const indirect = this.indirect
+			return indirect ? indirect.direct : null
+		}
+		getData() {
+			const identifier = this.identifier
+			const indirectUid = this.indirect ? this.indirect.uid : null
+			return { identifier, indirectUid }
+		}
+		getChildrenValue (indirects: number[] = []) {
+			const indirect = this.indirect
+			if (indirect && !indirects.includes(indirect.uid)) {
+				indirects.push(indirect.uid)
+				if (indirect.direct) {
+					const obj = indirect.direct
+					let val
+					if ('value' in obj) {
+						val = obj.value
+					}
+					else if ('getChildrenValue' in obj && typeof obj.getChildrenValue === 'function') {
+						val = obj.getChildrenValue(indirects)
+					}
+					else {
+						val = null
+					}
+					return val
+				}
+			}
+			return null
+		}
+	}
+
+	class RootObj extends ObjChildListBase implements ObjWithChildren {
+		readonly type: ObjTypeString = 'Root'
+		getData () {
+			return this.getChildrenArray()
+		}
+	}
+
+	class StreamObj extends ObjBase implements ObjWithChildren {
+		readonly type: ObjTypeString = 'Stream'
+		children: Map<'dictionary' | 'direct', DictionaryObj | ContentObj | ArrayObj | TextObj | BytesObj> = new Map()
+		sourceLocation: { start: number, end: number } | null = null
+		streamType: string | null = null
+		get dictionary (): DictionaryObj | null {
+			return this.children.get('dictionary') as DictionaryObj || null
+		}
+		set dictionary (obj) {
+			if (obj) {
+				this.children.set('dictionary', obj)
+			}
+			else {
+				this.children.delete('dictionary')
+			}
+		}
+		get direct (): ContentObj | ArrayObj | TextObj | BytesObj | null {
+			return this.children.get('direct') as ContentObj | ArrayObj | TextObj | BytesObj || null
+		}
+		set direct (obj) {
+			if (obj) {
+				this.children.set('direct', obj)
+			}
+			else {
+				this.children.delete('direct')
+			}
+		}
+		getData () {
+			const dictionary = this.dictionary ? this.dictionary.getData() : null
+			const direct = this.direct ? this.direct.getData() : null
+			return { dictionary, direct }
+		}
+	}
+
+	class TextObj extends ObjBase implements ObjWithValue {
+		readonly type: ObjTypeString = 'Text'
 		encoding: 'pdf' | 'utf-16be' | 'utf-8' = 'pdf'
 		tokenType: 'string' | 'hexstring' = 'string'
 		protected _value: string = ''
@@ -161,229 +434,63 @@ export namespace model {
 		}
 	}
 
-	export class PdfObjectBytes extends PdfObjectBase implements PdfObjectWithValue {
-		readonly type: TypeString = 'Bytes'
-		protected _value: Uint8Array = new Uint8Array(0)
-		get value () {
-			return this._value
-		}
-		set value (val) {
-			this._value = val
-		}
+	class XrefObj extends ObjChildListBase implements ObjWithChildren {
+		readonly type: ObjTypeString = 'Xref'
+		xrefTable: { startObjNum: number, objs: Array<{ offset: number, gen: number, free: boolean }> } | null = null
+		xrefDictionary: DictionaryObj | null = null
+		trailer: DictionaryObj | null = null
+		startxref: number | null = null
 		getData () {
-			return this.value
-		}
-	}
-
-	export class PdfObjectDate extends PdfObjectBase implements PdfObjectWithValue  {
-		readonly type: TypeString = 'Date'
-		protected _value: Date = new Date()
-		get value () {
-			return this._value
-		}
-		set value (val) {
-			this._value = val
-		}
-		getData () {
-			return this.value
-		}
-	}
-
-	export class PdfObjectName extends PdfObjectBase implements PdfObjectWithValue {
-		readonly type: TypeString = 'Name'
-		protected _value: string = ''
-		get value () {
-			return this._value
-		}
-		set value (val) {
-			this._value = val
-		}
-		getData () {
-			return this.value
-		}
-	}
-
-	export class PdfObjectArray extends PdfObjectBase implements PdfObjectWithChildren {
-		readonly type: TypeString = 'Array'
-		children: Map<number, PdfObject> = new Map()
-		get length () {
-			return this.children.size
-		}
-		push (obj: PdfObject) {
-			const key = this.children.size
-			this.children.set(key, obj)
-		}
-		getData () {
-			const data: Map<number, unknown> = new Map()
-			for (const [key, obj] of this.children.entries()) {
-				data.set(key, obj.getData())
-			}
-			return data
-		}
-		getAsArray () {
-			return Array.from(this.getData())
-		}
-	}
-
-	export class PdfObjectDictionary extends PdfObjectBase implements PdfObjectWithChildren {
-		readonly type: TypeString = 'Dictionary'
-		children: Map<string, PdfObject> = new Map()
-		getData () {
-			const data: Map<string, unknown> = new Map()
-			for (const [key, obj] of this.children.entries()) {
-				data.set(key, obj.getData())
-			}
-			return data
-		}
-		getAsObject () {
-			return Object.fromEntries(this.getData())
-		}
-	}
-
-	export class PdfObjectIndirect extends PdfObjectBase implements PdfObjectWithChildren {
-		readonly type: TypeString = 'Indirect'
-		children: Map<'direct', PdfObject> = new Map()
-		identifier:  IndirectIdentifier | null = null
-		get direct () {
-			return this.children.get('direct') || null
-		}
-		set direct (obj) {
-			if (obj) {
-				this.children.set('direct', obj)
-			}
-			else {
-				this.children.delete('direct')
+			return {
+				children: this.getChildrenArray(),
+				table: this.xrefTable,
+				trailer: this.trailer ? this.trailer.getChildrenValue() : null,
+				startxref: this.startxref
 			}
 		}
-		getData() {
-			const identifier = this.identifier
-			const direct = this.direct
-			return { identifier, direct }
-		}
 	}
 
-	export class PdfObjectRef extends PdfObjectBase implements PdfObjectWithChildren {
-		readonly type: TypeString = 'Ref'
-		identifier: null | { num: number, gen: number } = null
-		children: Map<'indirect', PdfObjectIndirect> = new Map()
-		get indirect () {
-			return this.children.get('indirect') || null
-		}
-		set indirect (obj) {
-			if (obj) {
-				this.children.set('indirect', obj)
-			}
-			else {
-				this.children.delete('indirect')
-			}
-		}
-		get direct () {
-			const indirect = this.indirect
-			return indirect ? indirect.direct : null
-		}
-		getData() {
-			const identifier = this.identifier
-			const indirect = this.indirect
-			const direct = this.direct
-			return { identifier, indirect, direct }
-		}
+	export const ObjType = {
+		Array: ArrayObj,
+		Boolean: BooleanObj,
+		Bytes: BytesObj,
+		Comment: CommentObj,
+		Content: ContentObj,
+		Date: DateObj,
+		Dictionary: DictionaryObj,
+		Indirect: IndirectObj,
+		Integer: IntegerObj,
+		Junk: JunkObj,
+		Name: NameObj,
+		Null: NullObj,
+		Op: OpObj,
+		Real: RealObj,
+		Ref: RefObj,
+		Root: RootObj,
+		Stream: StreamObj,
+		Text: TextObj,
+		Xref: XrefObj
 	}
 
-	export class PdfObjectStream extends PdfObjectBase implements PdfObjectWithChildren {
-		readonly type: TypeString = 'Stream'
-		children: Map<'dictionary' | 'direct', PdfObjectDictionary | PdfObjectContent | PdfObjectArray | PdfObjectText | PdfObjectBytes> = new Map()
-		sourceLocation: { start: number, end: number } | null = null
-		decodedBytes: Uint8Array | null = null
-		get dictionary (): PdfObjectDictionary | null {
-			return this.children.get('dictionary') as PdfObjectDictionary || null
-		}
-		set dictionary (obj) {
-			if (obj) {
-				this.children.set('dictionary', obj)
-			}
-			else {
-				this.children.delete('dictionary')
-			}
-		}
-		get direct (): PdfObjectContent | PdfObjectArray | PdfObjectText | PdfObjectBytes | null {
-			return this.children.get('direct') as PdfObjectContent | PdfObjectArray | PdfObjectText | PdfObjectBytes || null
-		}
-		set direct (obj) {
-			if (obj) {
-				this.children.set('direct', obj)
-			}
-			else {
-				this.children.delete('direct')
-			}
-		}
-		getData() {
-			const dictionary = this.dictionary
-			const direct = this.direct
-			return { dictionary, direct }
-		}
-	}
-
-	export class PdfObjectXref extends PdfObjectBase implements PdfObjectWithValue {
-		readonly type: TypeString = 'Xref'
-		protected _value: any = null
-		get value () {
-			return this._value
-		}
-		set value (val) {
-			this._value = val
-		}
-		getData () {
-			return this.value
-		}
-	}
-
-	export class PdfObjectContent extends PdfObjectArray {
-		readonly type: TypeString = 'Content'
-	}
-
-	export class PdfObjectOp extends PdfObjectName {
-		readonly type: TypeString = 'Op'
-	}
-
-	export class PdfObjectRoot extends PdfObjectArray {
-		readonly type: TypeString = 'Root'
-	}
-
-	export const PdfObjectType = {
-		Array: PdfObjectArray,
-		Boolean: PdfObjectBoolean,
-		Bytes: PdfObjectBytes,
-		Content: PdfObjectContent,
-		Date: PdfObjectDate,
-		Dictionary: PdfObjectDictionary,
-		Indirect: PdfObjectIndirect,
-		Integer: PdfObjectInteger,
-		Name: PdfObjectName,
-		Null: PdfObjectNull,
-		Op: PdfObjectOp,
-		Real: PdfObjectReal,
-		Ref: PdfObjectRef,
-		Root: PdfObjectRoot,
-		Stream: PdfObjectStream,
-		Text: PdfObjectText,
-		Xref: PdfObjectXref
-	}
-
-	export namespace PdfObjectType {
-		export type Array = PdfObjectArray
-		export type Boolean = PdfObjectBoolean
-		export type Bytes = PdfObjectBytes
-		export type Content = PdfObjectContent
-		export type Date = PdfObjectDate
-		export type Dictionary = PdfObjectDictionary
-		export type Indirect = PdfObjectIndirect
-		export type Integer = PdfObjectInteger
-		export type Name = PdfObjectName
-		export type Null = PdfObjectNull
-		export type Real = PdfObjectReal
-		export type Ref = PdfObjectRef
-		export type Root = PdfObjectRoot
-		export type Stream = PdfObjectStream
-		export type Text = PdfObjectText
+	export namespace ObjType {
+		export type Array = ArrayObj
+		export type Boolean = BooleanObj
+		export type Bytes = BytesObj
+		export type Comment = CommentObj
+		export type Content = ContentObj
+		export type Date = DateObj
+		export type Dictionary = DictionaryObj
+		export type Indirect = IndirectObj
+		export type Integer = IntegerObj
+		export type Junk = JunkObj
+		export type Name = NameObj
+		export type Null = NullObj
+		export type Op = OpObj
+		export type Real = RealObj
+		export type Ref = RefObj
+		export type Root = RootObj
+		export type Stream = StreamObj
+		export type Text = TextObj
+		export type Xref = XrefObj
 	}
 }
