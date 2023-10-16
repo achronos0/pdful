@@ -23,3 +23,17 @@ export class PdfError extends Error {
 		this.data = data
 	}
 }
+
+export namespace util {
+	export function isArrayOfNumber (val: unknown): val is number[] {
+		if (!Array.isArray(val)) {
+			return false
+		}
+		for (const el of val) {
+			if (typeof el !== 'number') {
+				return false
+			}
+		}
+		return true
+	}
+}

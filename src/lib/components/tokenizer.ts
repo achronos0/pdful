@@ -329,9 +329,12 @@ export namespace tokenizer {
 							this.warnings.push(new PdfError(`Invalid token (xref head) at offset ${start}`, 'tokenizer:invalid_token:xref:head', { offset: start, type: 'xref' }))
 							break
 						}
-						const startObjNum = parseInt(m[1])
+						const startNum = parseInt(m[1])
 						const objCount = parseInt(m[2])
-						const objs: Array<{ offset: number, gen: number, free: boolean }> = []
+						const objs: Array<
+							{ offset: number, gen: number, type: 'n' } |
+							{ nextFree: number, gen: number, type: 'f' }
+						> = []
 						for (let lineIndex = 0; lineIndex < objCount; lineIndex++) {
 							const lineStr = await this.reader.readStringUntil(this.engine.constants.TOKEN_BYTE_EOL, true)
 							const m = /^(\d+) (\d+) ([nf])/.exec(lineStr)
@@ -339,13 +342,20 @@ export namespace tokenizer {
 								this.warnings.push(new PdfError(`Invalid token (xref entry) at offset ${start}`, 'tokenizer:invalid_token:xref:entry', { offset: start, type: 'xref' }))
 								break
 							}
-							const offset = parseInt(m[1])
-							const gen = parseInt(m[2])
-							const free = m[2] === 'f'
-							objs.push({ offset, gen, free })
+							const type = m[2]
+							if (type === 'f') {
+								const nextFree = parseInt(m[1])
+								const gen = parseInt(m[2])
+								objs.push({ nextFree, gen, type })
+							}
+							else {
+								const offset = parseInt(m[1])
+								const gen = parseInt(m[2])
+								objs.push({ offset, gen, type: 'n' })
+							}
 						}
 						const end = this.reader.offset
-						return { type: 'xref', start, end, value: { startObjNum, objs } }
+						return { type: 'xref', start, end, value: { startNum, objs } }
 					}
 					case 'trailer': {
 						await this.reader.readArrayUntil(this.engine.constants.TOKEN_BYTE_EOL, true)
@@ -392,7 +402,13 @@ export namespace tokenizer {
 		null | boolean | number | string | number[] |
 		{ start: number, end: number } |
 		{ num: number, gen: number } |
-		{ startObjNum: number, objs: Array<{ offset: number, gen: number, free: boolean }> }
+		{
+			startNum: number,
+			objs: Array<
+				{ offset: number, gen: number, type: 'n' } |
+				{ nextFree: number, gen: number, type: 'f' }
+			>
+		}
 	)
 	export interface TokenBase {
 		start: number,
@@ -472,7 +488,13 @@ export namespace tokenizer {
 	}
 	export interface TokenXref extends TokenBase {
 		type: 'xref',
-		value: { startObjNum: number, objs: Array<{ offset: number, gen: number, free: boolean }> }
+		value: {
+			startNum: number,
+			objs: Array<
+				{ offset: number, gen: number, type: 'n' } |
+				{ nextFree: number, gen: number, type: 'f' }
+			>
+		}
 	}
 	export interface TokenTrailer extends TokenBase {
 		type: 'trailer',

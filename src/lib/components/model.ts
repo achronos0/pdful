@@ -1,5 +1,8 @@
 /**
- * Utilities to work with pdf document object model
+ * Utilities to work with pdf object model
+ *
+ * This is the pdf equivalent of the DOM (Document Object Model), and its structure is (sort of) like the DOM.
+ * Although there are differences, and the functionality is much simpler/less complete.
  *
  * @module
  */
@@ -7,7 +10,8 @@
 export namespace model {
 	export interface Obj {
 		type: ObjTypeString
-		collection: Collection
+		collection: ObjCollection
+		parent: ObjWithChildren | null
 		uid: number
 		getData (): unknown
 	}
@@ -18,7 +22,7 @@ export namespace model {
 		children: Map<string | number, Obj>
 	}
 	export interface ObjConstructor {
-		new (collection: Collection, uid: number): Obj
+		new (collection: ObjCollection, uid: number): Obj
 	}
 
 	export type ObjTypeString = (
@@ -39,6 +43,7 @@ export namespace model {
 		'Ref' |
 		'Root' |
 		'Stream' |
+		'Table' |
 		'Text' |
 		'Xref'
 	)
@@ -49,15 +54,15 @@ export namespace model {
 		'Indirect' |
 		'Root' |
 		'Stream' |
-		'Xref'
+		'Table'
 	)
 
-	export interface IndirectIdentifier {
+	export interface IndirectObjIdentifier {
 		num: number,
 		gen: number
 	}
 
-	export class Collection {
+	export class ObjCollection {
 		static maxUid = 0
 		readonly root: RootObj
 		objects: Map<number, Obj> = new Map()
@@ -77,14 +82,14 @@ export namespace model {
 			return obj
 		}
 
-		identifier (identifier: IndirectIdentifier) {
+		identifier (identifier: IndirectObjIdentifier) {
 			const key = String(identifier.num) + '/' + String(identifier.gen)
 			const obj = this.indirects.get(key)
 			return obj || null
 		}
 
 		createObject <T extends ObjConstructor>(Type: T): InstanceType<T> {
-			const obj = new Type(this, ++Collection.maxUid)
+			const obj = new Type(this, ++ObjCollection.maxUid)
 			this.addObject(obj)
 			return obj as InstanceType<T>
 		}
@@ -106,9 +111,10 @@ export namespace model {
 	}
 
 	abstract class ObjBase {
-		collection: Collection
+		collection: ObjCollection
+		parent: ObjWithChildren | null = null
 		uid: number
-		constructor (collection: Collection, uid: number) {
+		constructor (collection: ObjCollection, uid: number) {
 			this.collection = collection
 			this.uid = uid
 		}
@@ -135,6 +141,7 @@ export namespace model {
 		push (obj: Obj) {
 			const key = this.children.size
 			this.children.set(key, obj)
+			// obj.parent = this as unknown as ObjWithChildren
 		}
 		getChildrenArray () {
 			const data: unknown[] = []
@@ -256,7 +263,7 @@ export namespace model {
 	class IndirectObj extends ObjBase implements ObjWithChildren {
 		readonly type: ObjTypeString = 'Indirect'
 		children: Map<'direct', Obj> = new Map()
-		identifier:  IndirectIdentifier | null = null
+		identifier:  IndirectObjIdentifier | null = null
 		get direct () {
 			return this.children.get('direct') || null
 		}
@@ -382,7 +389,7 @@ export namespace model {
 
 	class StreamObj extends ObjBase implements ObjWithChildren {
 		readonly type: ObjTypeString = 'Stream'
-		children: Map<'dictionary' | 'direct', DictionaryObj | ContentObj | ArrayObj | TextObj | BytesObj> = new Map()
+		children: Map<'dictionary' | 'direct', DictionaryObj | ContentObj | ArrayObj | TextObj | BytesObj | XrefObj> = new Map()
 		sourceLocation: { start: number, end: number } | null = null
 		streamType: string | null = null
 		get dictionary (): DictionaryObj | null {
@@ -396,7 +403,7 @@ export namespace model {
 				this.children.delete('dictionary')
 			}
 		}
-		get direct (): ContentObj | ArrayObj | TextObj | BytesObj | null {
+		get direct (): ContentObj | ArrayObj | TextObj | BytesObj | XrefObj | null {
 			return this.children.get('direct') as ContentObj | ArrayObj | TextObj | BytesObj || null
 		}
 		set direct (obj) {
@@ -411,6 +418,28 @@ export namespace model {
 			const dictionary = this.dictionary ? this.dictionary.getData() : null
 			const direct = this.direct ? this.direct.getData() : null
 			return { dictionary, direct }
+		}
+	}
+
+	class TableObj extends ObjChildListBase implements ObjWithChildren {
+		readonly type: ObjTypeString = 'Table'
+		xrefTable: {
+			startNum: number,
+			objs: Array<
+				{ offset: number, gen: number, type: 'n' } |
+				{ nextFree: number, gen: number, type: 'f' }
+			>
+		} | null = null
+		xrefObj: XrefObj | null = null
+		trailer: DictionaryObj | null = null
+		startxref: number | null = null
+		getData () {
+			return {
+				children: this.getChildrenArray(),
+				table: this.xrefTable,
+				trailer: this.trailer ? this.trailer.getChildrenValue() : null,
+				startxref: this.startxref
+			}
 		}
 	}
 
@@ -434,19 +463,26 @@ export namespace model {
 		}
 	}
 
-	class XrefObj extends ObjChildListBase implements ObjWithChildren {
+	class XrefObj extends ObjBase implements ObjWithValue {
 		readonly type: ObjTypeString = 'Xref'
-		xrefTable: { startObjNum: number, objs: Array<{ offset: number, gen: number, free: boolean }> } | null = null
-		xrefDictionary: DictionaryObj | null = null
-		trailer: DictionaryObj | null = null
-		startxref: number | null = null
+		protected _value: {
+			widths: number[],
+			subsections: Array<{ startNum: number, count: number }>,
+			objTable: Array<
+				{ num: number, type: 0, nextFree: number, gen: number } |
+				{ num: number, type: 1, offset: number, gen: number } |
+				{ num: number, type: 2, streamNum: number, indexInStream: number } |
+				{ num: number, fields: Array<number | null> }
+			>
+		} | null = null
+		get value () {
+			return this._value
+		}
+		set value (val) {
+			this._value = val
+		}
 		getData () {
-			return {
-				children: this.getChildrenArray(),
-				table: this.xrefTable,
-				trailer: this.trailer ? this.trailer.getChildrenValue() : null,
-				startxref: this.startxref
-			}
+			return this.value
 		}
 	}
 
@@ -468,6 +504,7 @@ export namespace model {
 		Ref: RefObj,
 		Root: RootObj,
 		Stream: StreamObj,
+		Table: TableObj,
 		Text: TextObj,
 		Xref: XrefObj
 	}

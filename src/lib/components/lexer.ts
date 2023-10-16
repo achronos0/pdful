@@ -14,7 +14,7 @@ import type { tokenizer } from './tokenizer.js'
 export namespace lexer {
 	export class Lexer {
 		readonly engine: engine.Engine
-		readonly collection: model.Collection
+		readonly collection: model.ObjCollection
 		readonly warnings: PdfError[]
 		readonly decoders = {
 			latin1: new TextDecoder('latin1'),
@@ -28,7 +28,7 @@ export namespace lexer {
 
 		constructor (config: {
 			engine: engine.Engine,
-			collection: model.Collection,
+			collection: model.ObjCollection,
 			warnings: PdfError[]
 		}) {
 			this.engine = config.engine
@@ -163,7 +163,7 @@ export namespace lexer {
 					return null
 				}
 				case 'eof':
-					this.popStack('Xref', token)
+					this.popStack('Table', token)
 					return null
 				case 'op': {
 					const obj = this.collection.createObject(this.engine.model.ObjType.Op)
@@ -277,16 +277,17 @@ export namespace lexer {
 				return
 			}
 			const parent = this.stack[this.stack.length - 1]
+			obj.parent = parent
 			if (parent instanceof this.engine.model.ObjType.Root) {
-				const xrefObj = this.collection.createObject(this.engine.model.ObjType.Xref)
-				parent.push(xrefObj)
-				xrefObj.push(obj)
+				const tableObj = this.collection.createObject(this.engine.model.ObjType.Table)
+				parent.push(tableObj)
+				tableObj.push(obj)
 				return
 			}
 			if (
 				parent instanceof this.engine.model.ObjType.Array ||
 				parent instanceof this.engine.model.ObjType.Content ||
-				parent instanceof this.engine.model.ObjType.Xref
+				parent instanceof this.engine.model.ObjType.Table
 			) {
 				parent.push(obj)
 				return
@@ -340,7 +341,7 @@ export namespace lexer {
 					}
 				}
 			}
-			if (parent instanceof this.engine.model.ObjType.Xref) {
+			if (parent instanceof this.engine.model.ObjType.Table) {
 				if (this.pendingXrefTable) {
 					parent.xrefTable = this.pendingXrefTable.value
 				}

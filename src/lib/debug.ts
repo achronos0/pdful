@@ -52,7 +52,7 @@ export async function printObjectTree (obj: model.Obj, options: PrintObjectTreeO
 				tagSuffix += ' MISSING'
 			}
 		}
-		else if (obj instanceof model.ObjType.Array || obj instanceof model.ObjType.Root || obj instanceof model.ObjType.Xref) {
+		else if (obj instanceof model.ObjType.Array || obj instanceof model.ObjType.Root || obj instanceof model.ObjType.Table) {
 			tagSuffix = `(${obj.length})`
 			for (const [index, child] of obj.children.entries()) {
 				children.push([`${index}: `, child])
