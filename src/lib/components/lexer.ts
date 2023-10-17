@@ -15,12 +15,6 @@ export namespace lexer {
 	export class Lexer {
 		readonly engine: engine.Engine
 		readonly collection: model.ObjCollection
-		readonly warnings: PdfError[]
-		readonly decoders = {
-			latin1: new TextDecoder('latin1'),
-			utf16be: new TextDecoder('utf-16be'),
-			utf8: new TextDecoder('utf-8')
-		}
 		stack: model.ObjWithChildren[] = []
 		pendingDictionaryKey: string | null = null
 		pendingXrefTable: tokenizer.TokenXref | null = null
@@ -28,118 +22,117 @@ export namespace lexer {
 
 		constructor (config: {
 			engine: engine.Engine,
-			collection: model.ObjCollection,
-			warnings: PdfError[]
+			collection: model.ObjCollection
 		}) {
 			this.engine = config.engine
 			this.collection = config.collection
-			this.warnings = config.warnings
 		}
 
-		pushToken (token: tokenizer.Token): model.Obj | null {
+		pushToken (token: tokenizer.Token): {obj: model.Obj | null, warnings: PdfError[]} {
 			switch (token.type) {
 				case 'space':
 					// ignore
-					return null
+					return { obj: null, warnings: [] }
 				case 'comment': {
 					const obj = this.collection.createObject(this.engine.model.ObjType.Comment)
 					obj.value = token.value
-					this.insertObject(obj, token)
-					return obj
+					const warnings = this.insertObject(obj, token)
+					return { obj, warnings }
 				}
 				case 'junk': {
 					const obj = this.collection.createObject(this.engine.model.ObjType.Junk)
 					obj.value = token.value
-					this.insertObject(obj, token)
-					return obj
+					const warnings = this.insertObject(obj, token)
+					return { obj, warnings }
 				}
 				case 'null': {
 					const obj = this.collection.createObject(this.engine.model.ObjType.Null)
-					this.insertObject(obj, token)
-					return obj
+					const warnings = this.insertObject(obj, token)
+					return { obj, warnings }
 				}
 				case 'boolean': {
 					const obj = this.collection.createObject(this.engine.model.ObjType.Boolean)
 					obj.value = token.value
-					this.insertObject(obj, token)
-					return obj
+					const warnings = this.insertObject(obj, token)
+					return { obj, warnings }
 				}
 				case 'integer': {
 					const obj = this.collection.createObject(this.engine.model.ObjType.Integer)
 					obj.value = token.value
-					this.insertObject(obj, token)
-					return obj
+					const warnings = this.insertObject(obj, token)
+					return { obj, warnings }
 				}
 				case 'real': {
 					const obj = this.collection.createObject(this.engine.model.ObjType.Real)
 					obj.value = token.value
-					this.insertObject(obj, token)
-					return obj
+					const warnings = this.insertObject(obj, token)
+					return { obj, warnings }
 				}
 				case 'string': {
 					const obj = this.createStringObject('string', token.value)
-					this.insertObject(obj, token)
-					return obj
+					const warnings = this.insertObject(obj, token)
+					return { obj, warnings }
 				}
 				case 'hexstring': {
 					const obj = this.createStringObject('hexstring', token.value)
-					this.insertObject(obj, token)
-					return obj
+					const warnings = this.insertObject(obj, token)
+					return { obj, warnings }
 				}
 				case 'name': {
 					const obj = this.collection.createObject(this.engine.model.ObjType.Name)
 					obj.value = token.value
-					this.insertObject(obj, token)
-					return obj
+					const warnings = this.insertObject(obj, token)
+					return { obj, warnings }
 				}
 				case 'array_start': {
 					const obj = this.collection.createObject(this.engine.model.ObjType.Array)
-					this.insertObject(obj, token)
-					this.pushStack(obj)
-					return obj
+					const warnings1 = this.insertObject(obj, token)
+					const warnings2 = this.pushStack(obj)
+					return { obj, warnings: [...warnings1, ...warnings2] }
 				}
 				case 'array_end': {
-					this.popStack('Array', token)
-					return null
+					const warnings = this.popStack('Array', token)
+					return { obj: null, warnings }
 				}
 				case 'dictionary_start': {
 					const obj = this.collection.createObject(this.engine.model.ObjType.Dictionary)
-					this.insertObject(obj, token)
-					this.pushStack(obj)
-					return obj
+					const warnings1 = this.insertObject(obj, token)
+					const warnings2 = this.pushStack(obj)
+					return { obj, warnings: [...warnings1, ...warnings2] }
 				}
 				case 'dictionary_end': {
-					this.popStack('Dictionary', token)
-					return null
+					const warnings = this.popStack('Dictionary', token)
+					return { obj: null, warnings }
 				}
 				case 'indirect_start': {
 					const obj = this.collection.createObject(this.engine.model.ObjType.Indirect)
 					obj.identifier = token.value
 					this.collection.addObject(obj)
-					this.insertObject(obj, token)
-					this.pushStack(obj)
-					return obj
+					const warnings1 = this.insertObject(obj, token)
+					const warnings2 = this.pushStack(obj)
+					return { obj, warnings: [...warnings1, ...warnings2] }
 				}
 				case 'indirect_end': {
-					this.popStack('Indirect', token)
-					return null
+					const warnings = this.popStack('Indirect', token)
+					return { obj: null, warnings }
 				}
 				case 'ref': {
 					const obj = this.collection.createObject(this.engine.model.ObjType.Ref)
 					obj.identifier = token.value
-					this.insertObject(obj, token)
-					return obj
+					const warnings = this.insertObject(obj, token)
+					return { obj, warnings }
 				}
 				case 'stream': {
+					const warnings1: PdfError[] = []
 					let dictObj: model.ObjType.Dictionary | null = null
 					{
 						const parent = this.stack[this.stack.length - 1]
 						if (!(parent instanceof this.engine.model.ObjType.Indirect)) {
-							this.warnings.push(new PdfError(`Stream is not an indirect object at offset ${token.start}`, 'lexer:invalid_token:stream:not_indirect', { type: 'Stream', token }))
+							warnings1.push(new PdfError(`Stream is not an indirect object at offset ${token.start}`, 'lexer:invalid_token:stream:not_indirect', { type: 'Stream', token }))
 							break
 						}
 						if (!(parent.direct instanceof this.engine.model.ObjType.Dictionary)) {
-							this.warnings.push(new PdfError(`Stream is missing dictionary at offset ${token.start}`, 'lexer:invalid_token:stream:missing_dictionary', { type: 'Stream', token }))
+							warnings1.push(new PdfError(`Stream is missing dictionary at offset ${token.start}`, 'lexer:invalid_token:stream:missing_dictionary', { type: 'Stream', token }))
 							break
 						}
 						dictObj = parent.direct
@@ -151,28 +144,29 @@ export namespace lexer {
 						end: token.value.end
 					}
 					obj.dictionary = dictObj
-					this.insertObject(obj, token)
-					return obj
+					const warnings2 = this.insertObject(obj, token)
+					return { obj, warnings: [...warnings1, ...warnings2] }
 				}
 				case 'xref': {
 					this.pendingXrefTable = token
-					return null
+					return { obj: null, warnings: [] }
 				}
 				case 'trailer': {
 					this.pendingTrailer = true
-					return null
+					return { obj: null, warnings: [] }
 				}
-				case 'eof':
-					this.popStack('Table', token)
-					return null
+				case 'eof': {
+					const warnings = this.popStack('Table', token)
+					return { obj: null, warnings }
+				}
 				case 'op': {
 					const obj = this.collection.createObject(this.engine.model.ObjType.Op)
 					obj.value = token.value
-					this.insertObject(obj, token)
-					return obj
+					const warnings = this.insertObject(obj, token)
+					return { obj, warnings }
 				}
 			}
-			return null
+			return { obj: null, warnings: [] }
 		}
 
 		/**
@@ -216,7 +210,7 @@ export namespace lexer {
 			}
 			switch (handler) {
 				case 'date': {
-					const str = this.decoders.latin1.decode(Uint8Array.from(data))
+					const str = this.engine.codecs.decodeStringArray(Uint8Array.from(data), 'latin1')
 					const m = this.engine.constants.LEXER_DATE_REGEXP.exec(str)
 					if (m) {
 						const [
@@ -243,11 +237,11 @@ export namespace lexer {
 					break
 				}
 				case 'utf8': {
-					const str = this.decoders.utf8.decode(Uint8Array.from(data))
+					const str = this.engine.codecs.decodeStringArray(Uint8Array.from(data), 'utf8')
 					return createTextObject(str, 'utf-8')
 				}
 				case 'utf16be': {
-					const str = this.decoders.utf16be.decode(Uint8Array.from(data))
+					const str = this.engine.codecs.decodeStringArray(Uint8Array.from(data), 'utf16be')
 					return createTextObject(str, 'utf-8')
 				}
 			}
@@ -271,10 +265,11 @@ export namespace lexer {
 			return createTextObject(str, 'pdf')
 		}
 
-		insertObject (obj: model.Obj, token: tokenizer.Token) {
+		insertObject (obj: model.Obj, token: tokenizer.Token): PdfError[] {
+			const warnings: PdfError[] = []
 			if (this.pendingTrailer && obj instanceof this.engine.model.ObjType.Dictionary) {
 				this.pendingTrailer = obj
-				return
+				return warnings
 			}
 			const parent = this.stack[this.stack.length - 1]
 			obj.parent = parent
@@ -282,7 +277,8 @@ export namespace lexer {
 				const tableObj = this.collection.createObject(this.engine.model.ObjType.Table)
 				parent.push(tableObj)
 				tableObj.push(obj)
-				return
+				this.pushStack(tableObj)
+				return warnings
 			}
 			if (
 				parent instanceof this.engine.model.ObjType.Array ||
@@ -290,49 +286,51 @@ export namespace lexer {
 				parent instanceof this.engine.model.ObjType.Table
 			) {
 				parent.push(obj)
-				return
+				return warnings
 			}
 			if (parent instanceof this.engine.model.ObjType.Dictionary) {
 				if (this.pendingDictionaryKey != null) {
 					parent.children.set(this.pendingDictionaryKey, obj)
 					this.pendingDictionaryKey = null
-					return
+					return warnings
 				}
 				if ('value' in obj) {
 					this.pendingDictionaryKey = String(obj.value)
-					return
+					return warnings
 				}
-				this.warnings.push(new PdfError(`Invalid dictionary key ${obj.type} object at offset ${token.start}`, `lexer:invalid_token:${token.type}:invalid_key`, { type: 'Dictionary', token }))
+				warnings.push(new PdfError(`Invalid dictionary key ${obj.type} object at offset ${token.start}`, `lexer:invalid_token:${token.type}:invalid_key`, { type: 'Dictionary', token }))
 				this.pendingDictionaryKey = ''
-				return
+				return warnings
 			}
 			if (parent instanceof this.engine.model.ObjType.Indirect) {
 				if (!parent.direct) {
 					parent.direct = obj
-					return
+					return warnings
 				}
-				this.warnings.push(new PdfError(`Multiple direct objects inside indirect object at offset ${token.start}`, `lexer:invalid_token:${token.type}:multiple_children`, { type: 'Indirect', token, child: obj, parent }))
-				return
+				warnings.push(new PdfError(`Multiple direct objects inside indirect object at offset ${token.start}`, `lexer:invalid_token:${token.type}:multiple_children`, { type: 'Indirect', token, child: obj, parent }))
+				return warnings
 			}
 			throw new Error(`parser code error: invalid parent: ${parent.type}`)
 		}
 
-		pushStack (obj: model.ObjWithChildren) {
+		pushStack (obj: model.ObjWithChildren): PdfError[] {
 			this.stack.push(obj)
+			return []
 		}
 
-		popStack (type: model.ObjWithChildrenTypeString, token: tokenizer.Token) {
+		popStack (type: model.ObjWithChildrenTypeString, token: tokenizer.Token): PdfError[] {
+			const warnings: PdfError[] = []
 			if (this.stack.length <= 1) {
-				this.warnings.push(new PdfError(`Junk ${type} end token at offset ${token.start}`, `lexer:invalid_token:${token.type}:missing_start`, { type, token }))
-				return
+				warnings.push(new PdfError(`Junk ${type} end token at offset ${token.start}`, `lexer:invalid_token:${token.type}:missing_start`, { type, token }))
+				return warnings
 			}
 			let parent = this.stack.pop() as model.Obj
 			if (this.pendingDictionaryKey) {
 				this.pendingDictionaryKey = null
-				this.warnings.push(new PdfError(`Dictionary object is missing final value at offset ${token.start}`, `lexer:invalid_token:${token.type}:missing_value`, { type: 'Dictionary', object: parent, token }))
+				warnings.push(new PdfError(`Dictionary object is missing final value at offset ${token.start}`, `lexer:invalid_token:${token.type}:missing_value`, { type: 'Dictionary', object: parent, token }))
 			}
 			if (parent.type !== type) {
-				this.warnings.push(new PdfError(`Unterminated ${parent.type} object at offset ${token.start}`, `lexer:invalid_token:${parent.type}:missing_end`, { type: parent.type, object: parent, token }))
+				warnings.push(new PdfError(`Unterminated ${parent.type} object at offset ${token.start}`, `lexer:invalid_token:${parent.type}:missing_end`, { type: parent.type, object: parent, token }))
 				// keep popping objects until we pop one that matches the end token we got
 				while (this.stack.length > 1) {
 					parent = this.stack.pop() as model.Obj
@@ -343,7 +341,27 @@ export namespace lexer {
 			}
 			if (parent instanceof this.engine.model.ObjType.Table) {
 				if (this.pendingXrefTable) {
-					parent.xrefTable = this.pendingXrefTable.value
+					const xrefData = this.pendingXrefTable.value
+					const startNum = xrefData.startNum
+					const objs: Array<
+						{ num: number, offset: number, gen: number, type: 'n' } |
+						{ num: number, nextFree: number, reuseGen: number, type: 'f' }
+					> = []
+					for (let index = 0; index < xrefData.objs.length; index++) {
+						const num = startNum + index
+						const [field1, field2, type] = xrefData.objs[index]
+						if (type === 'n') {
+							const offset = field1
+							const gen = field2
+							objs.push({ num, offset, gen, type })
+						}
+						else if (type === 'f') {
+							const nextFree = field1
+							const reuseGen = field2
+							objs.push({ num, nextFree, reuseGen, type })
+						}
+					}
+					parent.xrefTable = { startNum, objs }
 				}
 				if (this.pendingTrailer instanceof this.engine.model.ObjType.Dictionary) {
 					parent.trailer = this.pendingTrailer
@@ -352,6 +370,7 @@ export namespace lexer {
 				this.pendingXrefTable = null
 				this.pendingTrailer = null
 			}
+			return warnings
 		}
 	}
 }

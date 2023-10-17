@@ -2,16 +2,17 @@
  * Debugging utilities
  */
 
+import util from 'node:util'
 import { model } from './components/model.js'
 
-export interface PrintObjectTreeOptions {
+export interface PrintObjTreeOptions {
 	maxDepth?: number | null,
 	indirectValues?: boolean,
 	refValues?: boolean,
 	contentValues?: boolean
 }
 
-export async function printObjectTree (obj: model.Obj, options: PrintObjectTreeOptions = {}) {
+export async function printObjTree (obj: model.Obj, options: PrintObjTreeOptions = {}) {
 	const {
 		maxDepth = null,
 		indirectValues = true,
@@ -21,9 +22,9 @@ export async function printObjectTree (obj: model.Obj, options: PrintObjectTreeO
 	const print = (str: string) => process.stdout.write(str)
 	const refsPrinted: Set<number> = new Set()
 	const walker = (obj: model.Obj, depth: number) => {
+		let spacer = '  '.repeat(depth + 1)
 		let tagSuffix: string | null = null
-		const children: [prefix: string, child: model.Obj][] = []
-		let extraLines: string[] = []
+		const children: [prefix: string, child?: model.Obj][] = []
 		if (obj instanceof model.ObjType.Indirect && obj.identifier) {
 			tagSuffix = ` #R${obj.identifier.num}/${obj.identifier.gen}`
 			if (obj.direct) {
@@ -40,7 +41,7 @@ export async function printObjectTree (obj: model.Obj, options: PrintObjectTreeO
 			if (obj.indirect) {
 				if (obj.direct && refValues) {
 					if (refsPrinted.has(obj.uid)) {
-						extraLines.push('Ref: ... (already printed)')
+						children.push(['Ref: ... (already printed)'])
 					}
 					else {
 						children.push(['Ref: ', obj.direct])
@@ -54,6 +55,17 @@ export async function printObjectTree (obj: model.Obj, options: PrintObjectTreeO
 		}
 		else if (obj instanceof model.ObjType.Array || obj instanceof model.ObjType.Root || obj instanceof model.ObjType.Table) {
 			tagSuffix = `(${obj.length})`
+			if (obj instanceof model.ObjType.Table) {
+				if (obj.trailer) {
+					children.push(['Trailer: ', obj.trailer])
+				}
+				if (obj.xrefTable) {
+					children.push(['Xref table: ' + util.inspect(obj.xrefTable).replace(/\n/gs, '\n' + spacer)])
+				}
+				if (obj.xrefObj) {
+					children.push(['Xref obj: ', obj.xrefObj])
+				}
+			}
 			for (const [index, child] of obj.children.entries()) {
 				children.push([`${index}: `, child])
 			}
@@ -105,7 +117,7 @@ export async function printObjectTree (obj: model.Obj, options: PrintObjectTreeO
 		if (tagSuffix) {
 			print(tagSuffix)
 		}
-		if (!children.length && !extraLines.length) {
+		if (!children.length) {
 			print('\n')
 			return
 		}
@@ -114,13 +126,14 @@ export async function printObjectTree (obj: model.Obj, options: PrintObjectTreeO
 			return
 		}
 		print('\n')
-		let spacer = '  '.repeat(depth + 1)
 		for (const [prefix, child] of children) {
 			print(spacer + prefix)
-			walker(child, depth + 1)
-		}
-		for (const line of extraLines) {
-			print(spacer + line + '\n')
+			if (child) {
+				walker(child, depth + 1)
+			}
+			else {
+				print('\n')
+			}
 		}
 	}
 	walker(obj, 0)

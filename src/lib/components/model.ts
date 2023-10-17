@@ -20,6 +20,8 @@ export namespace model {
 	}
 	export interface ObjWithChildren extends Obj {
 		children: Map<string | number, Obj>
+		getChildrenData (): unknown
+		getChildrenValue (indirects: number[]): unknown
 	}
 	export interface ObjConstructor {
 		new (collection: ObjCollection, uid: number): Obj
@@ -69,6 +71,7 @@ export namespace model {
 		indirects: Map<string, IndirectObj> = new Map()
 		refs: Set<RefObj> = new Set()
 		streams: Set<StreamObj> = new Set()
+		catalog: DictionaryObj | null = null
 
 		constructor () {
 			this.root = this.createObject(RootObj)
@@ -143,26 +146,22 @@ export namespace model {
 			this.children.set(key, obj)
 			// obj.parent = this as unknown as ObjWithChildren
 		}
-		getChildrenArray () {
+		getChildrenData () {
 			const data: unknown[] = []
 			for (const [key, obj] of this.children.entries()) {
-				const val = obj.getData()
-				data[key] = val
+				data[key] = obj.getData()
 			}
 			return data
 		}
 		getChildrenValue (indirects: number[] = []) {
 			const data: unknown[] = []
 			for (const [key, obj] of this.children.entries()) {
-				let val
+				let val = null
 				if ('value' in obj) {
 					val = obj.value
 				}
 				else if ('getChildrenValue' in obj && typeof obj.getChildrenValue === 'function') {
 					val = obj.getChildrenValue(indirects)
-				}
-				else {
-					val = null
 				}
 				data[key] = val
 			}
@@ -173,7 +172,7 @@ export namespace model {
 	class ArrayObj extends ObjChildListBase implements ObjWithChildren {
 		readonly type: ObjTypeString = 'Array'
 		getData () {
-			return this.getChildrenArray()
+			return this.getChildrenData()
 		}
 	}
 
@@ -212,7 +211,7 @@ export namespace model {
 	class ContentObj extends ObjChildListBase implements ObjWithChildren {
 		readonly type: ObjTypeString = 'Content'
 		getData () {
-			return this.getChildrenArray()
+			return this.getChildrenData()
 		}
 	}
 
@@ -233,26 +232,25 @@ export namespace model {
 	class DictionaryObj extends ObjBase implements ObjWithChildren {
 		readonly type: ObjTypeString = 'Dictionary'
 		children: Map<string, Obj> = new Map()
-		getData () {
+		getChildrenData () {
 			const data: { [key: string]: unknown } = {}
 			for (const [key, obj] of this.children.entries()) {
-				const val = obj.getData()
-				data[key] = val
+				data[key] = obj.getData()
 			}
 			return data
+		}
+		getData () {
+			return this.getChildrenData()
 		}
 		getChildrenValue (indirects: number[] = []) {
 			const data: { [key: string]: unknown } = {}
 			for (const [key, obj] of this.children.entries()) {
-				let val
+				let val = null
 				if ('value' in obj) {
 					val = obj.value
 				}
 				else if ('getChildrenValue' in obj && typeof obj.getChildrenValue === 'function') {
 					val = obj.getChildrenValue(indirects)
-				}
-				else {
-					val = null
 				}
 				data[key] = val
 			}
@@ -275,7 +273,27 @@ export namespace model {
 				this.children.delete('direct')
 			}
 		}
-		getData() {
+		getChildrenData () {
+			return {
+				direct: this.direct ? this.direct.getData() : null
+			}
+		}
+		getChildrenValue (indirects?: number[]): unknown {
+			let val = null
+			const obj = this.direct
+			if (obj) {
+				if ('value' in obj) {
+					val = obj.value
+				}
+				else if ('getChildrenValue' in obj && typeof obj.getChildrenValue === 'function') {
+					val = obj.getChildrenValue(indirects)
+				}
+			}
+			return {
+				direct: val
+			}
+		}
+		getData () {
 			const identifier = this.identifier
 			const direct = this.direct ? this.direct.getData() : null
 			return { identifier, direct }
@@ -357,6 +375,11 @@ export namespace model {
 			const indirectUid = this.indirect ? this.indirect.uid : null
 			return { identifier, indirectUid }
 		}
+		getChildrenData () {
+			return {
+				indirect: this.indirect ? this.indirect.getData() : null
+			}
+		}
 		getChildrenValue (indirects: number[] = []) {
 			const indirect = this.indirect
 			if (indirect && !indirects.includes(indirect.uid)) {
@@ -383,7 +406,7 @@ export namespace model {
 	class RootObj extends ObjChildListBase implements ObjWithChildren {
 		readonly type: ObjTypeString = 'Root'
 		getData () {
-			return this.getChildrenArray()
+			return this.getChildrenData()
 		}
 	}
 
@@ -414,6 +437,26 @@ export namespace model {
 				this.children.delete('direct')
 			}
 		}
+		getChildrenData () {
+			return {
+				direct: this.direct ? this.direct.getData() : null
+			}
+		}
+		getChildrenValue (indirects: number[] = []): unknown {
+			let val = null
+			const obj = this.direct
+			if (obj) {
+				if ('value' in obj) {
+					val = obj.value
+				}
+				else if ('getChildrenValue' in obj && typeof obj.getChildrenValue === 'function') {
+					val = obj.getChildrenValue(indirects)
+				}
+			}
+			return {
+				direct: val
+			}
+		}
 		getData () {
 			const dictionary = this.dictionary ? this.dictionary.getData() : null
 			const direct = this.direct ? this.direct.getData() : null
@@ -426,8 +469,8 @@ export namespace model {
 		xrefTable: {
 			startNum: number,
 			objs: Array<
-				{ offset: number, gen: number, type: 'n' } |
-				{ nextFree: number, gen: number, type: 'f' }
+				{ num: number, offset: number, gen: number, type: 'n' } |
+				{ num: number, nextFree: number, reuseGen: number, type: 'f' }
 			>
 		} | null = null
 		xrefObj: XrefObj | null = null
@@ -435,8 +478,9 @@ export namespace model {
 		startxref: number | null = null
 		getData () {
 			return {
-				children: this.getChildrenArray(),
-				table: this.xrefTable,
+				children: this.getChildrenData(),
+				xrefTable: this.xrefTable,
+				xrefObj: this.xrefObj ? this.xrefObj.getData() : null,
 				trailer: this.trailer ? this.trailer.getChildrenValue() : null,
 				startxref: this.startxref
 			}
@@ -469,7 +513,7 @@ export namespace model {
 			widths: number[],
 			subsections: Array<{ startNum: number, count: number }>,
 			objTable: Array<
-				{ num: number, type: 0, nextFree: number, gen: number } |
+				{ num: number, type: 0, nextFree: number, reuseGen: number } |
 				{ num: number, type: 1, offset: number, gen: number } |
 				{ num: number, type: 2, streamNum: number, indexInStream: number } |
 				{ num: number, fields: Array<number | null> }

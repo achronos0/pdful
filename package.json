@@ -10,6 +10,7 @@
 		"typescript": "^5.2.2"
 	},
 	"scripts": {
+		"build": "tsc",
 		"test": "tsx src/test/test.ts"
 	}
 }

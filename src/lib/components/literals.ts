@@ -39,13 +39,13 @@ export namespace literals {
 			return [0, 9, 10, 12, 13, 32]
 		}
 		get TOKEN_BYTE_EOL () {
-			return [10]
+			return [10, 13]
 		}
 		get TOKEN_BYTE_GREATERTHAN () {
 			return [this.byteChar('>')]
 		}
 		get TOKEN_BYTE_NAME () {
-			return [...this.byteCharRange('!', '~', '%()[]<>')]
+			return [...this.byteCharRange('!', '~', '%()/[]<>')]
 		}
 		get TOKEN_BYTE_STRINGPAREN () {
 			return [this.byteChar('('), this.byteChar(')'), this.byteChar('\\')]
@@ -66,6 +66,9 @@ export namespace literals {
 				...this.byteCharRange('a', 'z', ''),
 				...this.byteCharRange('A', 'Z', '')
 			]
+		}
+		get TOKEN_BYTE_ENDSTREAM () {
+			return [...this.TOKEN_BYTE_EOL, this.byteChar('e')]
 		}
 
 		get LEXER_STRING_TESTS () {
