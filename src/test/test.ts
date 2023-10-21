@@ -1,11 +1,12 @@
 
-import fs from 'node:fs/promises'
+import fs, { FileHandle } from 'node:fs/promises'
 import { createEngine, io } from '../node.js'
 import { PrintObjTreeOptions, printObjTree } from '../lib/debug.js'
 import type { parser } from '../lib/components/parser.js'
 
 // Constants
-const INPUT_FILE = 'input/2.pdf'
+const INPUT_NUMBER = 4
+const INPUT_FILE = `input/${INPUT_NUMBER}.pdf`
 const INPUT_USE_BUFFER = false
 const ABORT_ON_WARNING = true
 const PRINT_ROOT_OBJ = false
@@ -23,6 +24,7 @@ async function run () {
 	const parser = new engine.parser.Parser({ engine })
 
 	// Init reader
+	let fileHandle: FileHandle | null = null
 	let reader: io.ReaderPair
 	if (INPUT_USE_BUFFER) {
 		const buffer = await fs.readFile(INPUT_FILE)
@@ -30,7 +32,7 @@ async function run () {
 		reader = engine.io.createReaderFromArray(bytes)
 	}
 	else {
-		const fileHandle = await fs.open(INPUT_FILE, 'r')
+		fileHandle = await fs.open(INPUT_FILE, 'r')
 		reader = await engine.io.createReaderFromFileHandle(fileHandle)
 	}
 
@@ -59,6 +61,11 @@ async function run () {
 	}
 	const { pdfVersion, collection, warnings } = await parser.run({ reader, options })
 
+	// Close file
+	if (fileHandle) {
+		await fileHandle.close()
+	}
+
 	// Report results
 	console.log('pdfVersion: ', pdfVersion)
 	if (PRINT_ROOT_OBJ) {
@@ -83,8 +90,26 @@ async function run () {
 			}
 		}
 		else if (PRINT_WARNINGS) {
-			for (const [index, err] of warnings.entries()) {
-				console.error(index + 1, err.message)
+			const messageMap: {[message: string]: number} = {}
+			for (const err of warnings.values()) {
+				const message = err.message
+				if (messageMap[message]) {
+					messageMap[message]++
+				}
+				else {
+					messageMap[message] = 1
+				}
+			}
+			const messages = Object.keys(messageMap)
+			messages.sort()
+			for (const [index, message] of messages.entries()) {
+				const count = messageMap[message]
+				if (count > 1) {
+					console.error(index + 1, `${message} [x ${count}]`)
+				}
+				else {
+					console.error(index + 1, message)
+				}
 			}
 		}
 	}

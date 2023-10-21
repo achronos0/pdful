@@ -48,7 +48,7 @@ export namespace parser {
 			await this.resolveStreamTypes({ collection })
 			{
 				const warnings = await this.parseStreams({ offsetReader, collection, options })
-				if (warnings) {
+				if (warnings.length) {
 					allWarnings.push(...warnings)
 					if (abortOnWarning) {
 						return { pdfVersion, collection, warnings: allWarnings }
@@ -57,6 +57,15 @@ export namespace parser {
 			}
 			await this.resolveRefs({ collection })
 			await this.resolveCatalog({ collection })
+			{
+				const warnings = await this.resolveMissingRefs({ collection })
+				if (warnings.length) {
+					allWarnings.push(...warnings)
+					if (abortOnWarning) {
+						return { pdfVersion, collection, warnings: allWarnings }
+					}
+				}
+			}
 			return { pdfVersion, collection, warnings: allWarnings }
 		}
 
@@ -112,14 +121,26 @@ export namespace parser {
 
 		async resolveRefs (config: { collection: model.ObjCollection }) {
 			const collection = config.collection
-			for (const ref of collection.refs.values()) {
-				if (ref.identifier && !ref.indirect) {
-					const obj = collection.identifier(ref.identifier)
+			for (const refObj of collection.refs.values()) {
+				if (refObj.identifier && !refObj.indirect) {
+					const obj = collection.identifier(refObj.identifier)
 					if (obj) {
-						ref.indirect = obj
+						refObj.indirect = obj
 					}
 				}
 			}
+		}
+
+		async resolveMissingRefs (config: { collection: model.ObjCollection }) {
+			const warnings: PdfError[] = []
+			const collection = config.collection
+			for (const refObj of collection.refs.values()) {
+				if (refObj.identifier && !refObj.indirect) {
+					const key = String(refObj.identifier.num) + '/' + String(refObj.identifier.gen)
+					warnings.push(new PdfError(`Reference to missing indirect obj ${key}`, 'parser:invalid:ref:identifier', { type: 'ref', obj: refObj }))
+				}
+			}
+			return warnings
 		}
 
 		async resolveStreamTypes (config: { collection: model.ObjCollection }) {
@@ -170,37 +191,47 @@ export namespace parser {
 				}
 				const { bytes, warnings: decodeWarnings } = await this.decodeStreamObj({ streamObj, offsetReader })
 				allWarnings.push(...decodeWarnings)
+				let directObj: model.ObjType.Content | model.ObjType.Bytes | model.ObjType.Array | model.ObjType.Xref | model.ObjType.Text
 				switch (streamType) {
 					case 'Content': {
-						const { warnings } = await this.parseContentStreamObj({ streamObj, bytes, options })
+						const { obj, warnings } = await this.parseContentStreamObj({ streamObj, bytes, options })
+						directObj = obj
 						allWarnings.push(...warnings)
 						break
 					}
 					case 'XObject/Form': {
-						const { warnings } = await this.parseContentStreamObj({ streamObj, bytes, options })
+						const { obj, warnings } = await this.parseContentStreamObj({ streamObj, bytes, options })
+						directObj = obj
 						allWarnings.push(...warnings)
 						break
 					}
 					case 'XObject/Image': {
-						const { warnings } = await this.parseImageStreamObj({ streamObj, bytes, options })
+						const { obj, warnings } = await this.parseImageStreamObj({ streamObj, bytes, options })
+						directObj = obj
 						allWarnings.push(...warnings)
 						break
 					}
 					case 'ObjStm': {
-						const { warnings } = await this.parseObjectStreamObj({ streamObj, bytes, options })
+						const { obj, warnings } = await this.parseObjectStreamObj({ streamObj, bytes, options })
+						directObj = obj
 						allWarnings.push(...warnings)
 						break
 					}
 					case 'XRef': {
-						const { warnings } = await this.parseXrefStreamObj({ streamObj, bytes, options })
+						const { obj, warnings } = await this.parseXrefStreamObj({ streamObj, bytes, options })
+						directObj = obj
 						allWarnings.push(...warnings)
 						break
 					}
 					default: {
-						const { warnings } = await this.parseBinaryStreamObj({ streamObj, bytes, options })
+						const { obj, warnings } = await this.parseBinaryStreamObj({ streamObj, bytes, options })
+						directObj = obj
 						allWarnings.push(...warnings)
 					}
 				}
+				collection.addObject(directObj)
+				streamObj.direct = directObj
+				directObj.parent = streamObj
 				if (allWarnings.length && abortOnWarning) {
 					break
 				}
@@ -329,7 +360,6 @@ export namespace parser {
 			const collection = streamObj.collection
 
 			const obj = collection.createObject(this.engine.model.ObjType.Content)
-			streamObj.direct = obj
 
 			const sequentialReader = new this.engine.io.SequentialMemoryReader(bytes)
 			const stack = [obj]
@@ -350,7 +380,6 @@ export namespace parser {
 			const dictObj = streamObj.dictionary
 
 			const obj = collection.createObject(this.engine.model.ObjType.Array)
-			streamObj.direct = obj
 
 			if (!dictObj) {
 				return { obj, warnings: [] }
@@ -381,7 +410,9 @@ export namespace parser {
 			for (const [num, start, end] of objOffsets) {
 				const indirectObj = collection.createObject(this.engine.model.ObjType.Indirect)
 				indirectObj.identifier = { num, gen: 0 }
+				indirectObj.parent = obj
 				obj.push(indirectObj)
+				collection.addObject(indirectObj)
 				const sequentialReader = new this.engine.io.SequentialMemoryReader(bytes.subarray(start, end))
 				const stack = [indirectObj]
 				const warnings = await this._parseObjectData({ sequentialReader, collection, stack, options })
@@ -404,7 +435,6 @@ export namespace parser {
 
 			const warnings: PdfError[] = []
 			const obj = collection.createObject(this.engine.model.ObjType.Xref)
-			streamObj.direct = obj
 
 			if (!dictObj) {
 				return { obj, warnings }
@@ -516,7 +546,6 @@ export namespace parser {
 						objTable.push({ num, fields })
 				}
 			}
-
 			obj.value = { widths, subsections, objTable }
 
 			let parentObj = streamObj.parent
@@ -552,8 +581,8 @@ export namespace parser {
 			const collection = streamObj.collection
 
 			const obj = collection.createObject(this.engine.model.ObjType.Bytes)
-			streamObj.direct = obj
 			obj.value = bytes
+
 			return { obj, warnings: []}
 		}
 

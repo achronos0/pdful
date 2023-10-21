@@ -19,12 +19,31 @@ export namespace codecs {
 		for (const filter of filters) {
 			try {
 				switch (filter.name) {
+					// case 'ASCIIHexDecode':
+					// 	break
+					// case 'ASCII85Decode':
+					// 	break
+					// case 'LZWDecode':
+					// 	break
 					case 'FlateDecode':
 						bytes = pako.inflate(bytes)
 						if (!bytes) {
 							throw new PdfError(`inflate returned ${typeof bytes}`, 'decoder:error:stream_filter:FlateDecode')
 						}
 						break
+					// case 'RunLengthDecode':
+					// 	break
+					// case 'CCITTFaxDecode':
+					// 	break
+					// case 'JBIG2Decode':
+					// 	break
+					case 'DCTDecode':
+						// bytes are a JPEG image, return unchanged
+						break
+					// case 'JPXDecode':
+					// 	break
+					// case 'Crypt':
+					// 	break
 					default:
 						throw new PdfError(`@TODO: Not supported: Unsupported stream filter ${filter.name}`, `decoder:not_implemented:stream_filter:${filter.name}`, { type: 'Stream', notImplemented: true, filter })
 				}

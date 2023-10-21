@@ -322,10 +322,11 @@ export namespace tokenizer {
 					}
 					case 'xref': {
 						await this.reader.readArrayWhile(this.engine.constants.TOKEN_BYTE_EOL)
-						const headStr = await this.reader.readStringUntil(this.engine.constants.TOKEN_BYTE_EOL, true)
+						const headStr = await this.reader.readStringUntil(this.engine.constants.TOKEN_BYTE_EOL, false)
+						await this.reader.readArrayWhile(this.engine.constants.TOKEN_BYTE_EOL)
 						const m = /^(\d+) (\d+)/.exec(headStr)
 						if (!m) {
-							warning = new PdfError(`Invalid token (xref head) at offset ${start}`, 'tokenizer:invalid_token:xref:head', { offset: start, type: 'xref' })
+							warning = new PdfError(`Invalid token (xref head) "${headStr}" at offset ${start}`, 'tokenizer:invalid_token:xref:head', { offset: start, type: 'xref' })
 							break
 						}
 						const startNum = parseInt(m[1])
@@ -336,7 +337,7 @@ export namespace tokenizer {
 							await this.reader.readArrayWhile(this.engine.constants.TOKEN_BYTE_EOL)
 							const m = /^(\d+) (\d+) ([nf])/.exec(lineStr)
 							if (!m) {
-								warning = new PdfError(`Invalid token (xref entry) at offset ${start}`, 'tokenizer:invalid_token:xref:entry', { offset: start, type: 'xref' })
+								warning = new PdfError(`Invalid token (xref entry) "${lineStr}" at offset ${start}`, 'tokenizer:invalid_token:xref:entry', { offset: start, type: 'xref' })
 								continue
 							}
 							const field1 = parseInt(m[1])
