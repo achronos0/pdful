@@ -1,16 +1,16 @@
 
-import fs, { FileHandle } from 'node:fs/promises'
-import { createEngine, io } from '../node.js'
+import fs from 'node:fs/promises'
+import { createEngine } from '../node.js'
 import { PrintObjTreeOptions, printObjTree } from '../lib/debug.js'
 import type { parser } from '../lib/components/parser.js'
 
 // Constants
-const INPUT_NUMBER = 4
+const INPUT_NUMBER = 6
 const INPUT_FILE = `input/${INPUT_NUMBER}.pdf`
 const INPUT_USE_BUFFER = false
 const ABORT_ON_WARNING = true
 const PRINT_ROOT_OBJ = false
-const PRINT_CATALOG_OBJ = true
+const PRINT_CATALOG_OBJ = false
 const PRINT_OBJ_OPTIONS: PrintObjTreeOptions = {
 	maxDepth: 8
 }
@@ -19,30 +19,13 @@ const PRINT_LEXER = false
 const PRINT_WARNINGS: boolean | 'first' | 'detail' = 'detail'
 
 async function run () {
-	// Init components
-	const engine = createEngine()
-	const parser = new engine.parser.Parser({ engine })
-
-	// Init reader
-	let fileHandle: FileHandle | null = null
-	let reader: io.ReaderPair
-	if (INPUT_USE_BUFFER) {
-		const buffer = await fs.readFile(INPUT_FILE)
-		const bytes = Uint8Array.from(buffer)
-		reader = engine.io.createReaderFromArray(bytes)
-	}
-	else {
-		fileHandle = await fs.open(INPUT_FILE, 'r')
-		reader = await engine.io.createReaderFromFileHandle(fileHandle)
-	}
-
-	// Parse
-	const options: parser.ParserRunOptions = {}
+	// Setup parser options
+	const parserOptions: parser.ParserRunOptions = {}
 	if (ABORT_ON_WARNING) {
-		options.abortOnWarning = true
+		parserOptions.abortOnWarning = true
 	}
 	if (PRINT_TOKENS) {
-		options.onToken = token => {
+		parserOptions.onToken = token => {
 			const args: any[] = [token.type, token.start]
 			if (token.warning) {
 				args.push(token.warning.message)
@@ -51,7 +34,7 @@ async function run () {
 		}
 	}
 	if (PRINT_LEXER) {
-		options.onLexer = (obj, warnings) => {
+		parserOptions.onLexer = (obj, warnings) => {
 			const args: any[] = [obj ? obj.type : undefined]
 			if (warnings.length) {
 				args.push(...warnings.map(err => err.message))
@@ -59,39 +42,47 @@ async function run () {
 			console.log('lexer', ...args)
 		}
 	}
-	const { pdfVersion, collection, warnings } = await parser.run({ reader, options })
 
-	// Close file
-	if (fileHandle) {
-		await fileHandle.close()
+	// Init components
+	const engine = createEngine()
+
+	// Load document
+	let document
+	if (INPUT_USE_BUFFER) {
+		const buffer = await fs.readFile(INPUT_FILE)
+		const bytes = Uint8Array.from(buffer)
+		document = await engine.loadDocumentFromArray({ bytes, parserOptions })
+	}
+	else {
+		document = await engine.loadDocumentFromFile({ file: INPUT_FILE, parserOptions })
 	}
 
 	// Report results
-	console.log('pdfVersion: ', pdfVersion)
+	console.log('pdfVersion: ', document.store.pdfVersion)
 	if (PRINT_ROOT_OBJ) {
-		printObjTree(collection.root, PRINT_OBJ_OPTIONS)
+		printObjTree(document.store.root, PRINT_OBJ_OPTIONS)
 	}
 	if (PRINT_CATALOG_OBJ) {
-		if (collection.catalog) {
-			printObjTree(collection.catalog, PRINT_OBJ_OPTIONS)
+		if (document.store.catalog) {
+			printObjTree(document.store.catalog, PRINT_OBJ_OPTIONS)
 		}
 		else {
 			console.warn('No catalog object')
 		}
 	}
-	if (warnings.length) {
-		console.error(`Parser warnings: ${warnings.length} warnings`)
+	if (document.parserWarnings.length) {
+		console.error(`Parser warnings: ${document.parserWarnings.length} warnings`)
 		if (PRINT_WARNINGS === 'first') {
-			console.error(1, warnings[0])
+			console.error(1, document.parserWarnings[0])
 		}
 		else if (PRINT_WARNINGS === 'detail') {
-			for (const [index, err] of warnings.entries()) {
+			for (const [index, err] of document.parserWarnings.entries()) {
 				console.error(index + 1, err)
 			}
 		}
 		else if (PRINT_WARNINGS) {
 			const messageMap: {[message: string]: number} = {}
-			for (const err of warnings.values()) {
+			for (const err of document.parserWarnings.values()) {
 				const message = err.message
 				if (messageMap[message]) {
 					messageMap[message]++

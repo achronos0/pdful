@@ -1,5 +1,5 @@
 /**
- * Convert document data from tokens into a tree of pdf objects.
+ * Convert document data from syntax tokens to pdf objects
  *
  * Lexer is the second stage of parsing.
  *
@@ -14,18 +14,18 @@ import type { tokenizer } from './tokenizer.js'
 export namespace lexer {
 	export class Lexer {
 		readonly engine: engine.Engine
-		readonly collection: model.ObjCollection
+		readonly store: model.ObjStore
 		stack: model.ObjWithChildren[] = []
 		pendingDictionaryKey: string | null = null
 		pendingXrefTable: tokenizer.TokenXref | null = null
 		pendingTrailer: true | model.ObjType.Dictionary | null = null
 
 		constructor (config: {
-			engine: engine.Engine,
-			collection: model.ObjCollection
+			engine: engine.Engine
+			store: model.ObjStore
 		}) {
 			this.engine = config.engine
-			this.collection = config.collection
+			this.store = config.store
 		}
 
 		pushToken (token: tokenizer.Token): {obj: model.Obj | null, warnings: PdfError[]} {
@@ -34,36 +34,36 @@ export namespace lexer {
 					// ignore
 					return { obj: null, warnings: [] }
 				case 'comment': {
-					const obj = this.collection.createObject(this.engine.model.ObjType.Comment)
+					const obj = this.store.createObject(this.engine.model.ObjType.Comment)
 					obj.value = token.value
 					const warnings = this.insertObject(obj, token)
 					return { obj, warnings }
 				}
 				case 'junk': {
-					const obj = this.collection.createObject(this.engine.model.ObjType.Junk)
+					const obj = this.store.createObject(this.engine.model.ObjType.Junk)
 					obj.value = token.value
 					const warnings = this.insertObject(obj, token)
 					return { obj, warnings }
 				}
 				case 'null': {
-					const obj = this.collection.createObject(this.engine.model.ObjType.Null)
+					const obj = this.store.createObject(this.engine.model.ObjType.Null)
 					const warnings = this.insertObject(obj, token)
 					return { obj, warnings }
 				}
 				case 'boolean': {
-					const obj = this.collection.createObject(this.engine.model.ObjType.Boolean)
+					const obj = this.store.createObject(this.engine.model.ObjType.Boolean)
 					obj.value = token.value
 					const warnings = this.insertObject(obj, token)
 					return { obj, warnings }
 				}
 				case 'integer': {
-					const obj = this.collection.createObject(this.engine.model.ObjType.Integer)
+					const obj = this.store.createObject(this.engine.model.ObjType.Integer)
 					obj.value = token.value
 					const warnings = this.insertObject(obj, token)
 					return { obj, warnings }
 				}
 				case 'real': {
-					const obj = this.collection.createObject(this.engine.model.ObjType.Real)
+					const obj = this.store.createObject(this.engine.model.ObjType.Real)
 					obj.value = token.value
 					const warnings = this.insertObject(obj, token)
 					return { obj, warnings }
@@ -79,13 +79,13 @@ export namespace lexer {
 					return { obj, warnings }
 				}
 				case 'name': {
-					const obj = this.collection.createObject(this.engine.model.ObjType.Name)
+					const obj = this.store.createObject(this.engine.model.ObjType.Name)
 					obj.value = token.value
 					const warnings = this.insertObject(obj, token)
 					return { obj, warnings }
 				}
 				case 'array_start': {
-					const obj = this.collection.createObject(this.engine.model.ObjType.Array)
+					const obj = this.store.createObject(this.engine.model.ObjType.Array)
 					const warnings1 = this.insertObject(obj, token)
 					const warnings2 = this.pushStack(obj)
 					return { obj, warnings: [...warnings1, ...warnings2] }
@@ -95,7 +95,7 @@ export namespace lexer {
 					return { obj: null, warnings }
 				}
 				case 'dictionary_start': {
-					const obj = this.collection.createObject(this.engine.model.ObjType.Dictionary)
+					const obj = this.store.createObject(this.engine.model.ObjType.Dictionary)
 					const warnings1 = this.insertObject(obj, token)
 					const warnings2 = this.pushStack(obj)
 					return { obj, warnings: [...warnings1, ...warnings2] }
@@ -105,9 +105,9 @@ export namespace lexer {
 					return { obj: null, warnings }
 				}
 				case 'indirect_start': {
-					const obj = this.collection.createObject(this.engine.model.ObjType.Indirect)
+					const obj = this.store.createObject(this.engine.model.ObjType.Indirect)
 					obj.identifier = token.value
-					this.collection.addObject(obj)
+					this.store.addObject(obj)
 					const warnings1 = this.insertObject(obj, token)
 					const warnings2 = this.pushStack(obj)
 					return { obj, warnings: [...warnings1, ...warnings2] }
@@ -117,7 +117,7 @@ export namespace lexer {
 					return { obj: null, warnings }
 				}
 				case 'ref': {
-					const obj = this.collection.createObject(this.engine.model.ObjType.Ref)
+					const obj = this.store.createObject(this.engine.model.ObjType.Ref)
 					obj.identifier = token.value
 					const warnings = this.insertObject(obj, token)
 					return { obj, warnings }
@@ -138,7 +138,7 @@ export namespace lexer {
 						dictObj = parent.direct
 						parent.direct = null
 					}
-					const obj = this.collection.createObject(this.engine.model.ObjType.Stream)
+					const obj = this.store.createObject(this.engine.model.ObjType.Stream)
 					obj.sourceLocation = {
 						start: token.value.start,
 						end: token.value.end
@@ -160,7 +160,7 @@ export namespace lexer {
 					return { obj: null, warnings }
 				}
 				case 'op': {
-					const obj = this.collection.createObject(this.engine.model.ObjType.Op)
+					const obj = this.store.createObject(this.engine.model.ObjType.Op)
 					obj.value = token.value
 					const warnings = this.insertObject(obj, token)
 					return { obj, warnings }
@@ -183,7 +183,7 @@ export namespace lexer {
 			data: number[]
 		): model.ObjType.Text | model.ObjType.Bytes | model.ObjType.Date {
 			const createTextObject = (value: string, encoding: 'pdf' | 'utf-8' | 'utf-16be') => {
-				const obj = this.collection.createObject(this.engine.model.ObjType.Text)
+				const obj = this.store.createObject(this.engine.model.ObjType.Text)
 				obj.value = value
 				obj.tokenType = tokenType
 				obj.encoding = encoding
@@ -229,7 +229,7 @@ export namespace lexer {
 						const tzOffset = offsetSign === 'Z' ? 'Z' : `${offsetSign}${offsetHours}:${offsetMins}`
 						const date = new Date(`${year}-${month}-${day}T${hours}:${mins}:${secs}${tzOffset}`)
 
-						const obj = this.collection.createObject(this.engine.model.ObjType.Date)
+						const obj = this.store.createObject(this.engine.model.ObjType.Date)
 						obj.value = date
 						return obj
 					}
@@ -248,7 +248,7 @@ export namespace lexer {
 
 			// Handle byte string
 			if (tokenType === 'hexstring') {
-				const obj = this.collection.createObject(this.engine.model.ObjType.Bytes)
+				const obj = this.store.createObject(this.engine.model.ObjType.Bytes)
 				obj.value = Uint8Array.from(data)
 				return obj
 			}
@@ -274,7 +274,7 @@ export namespace lexer {
 			const parent = this.stack[this.stack.length - 1]
 			obj.parent = parent
 			if (parent instanceof this.engine.model.ObjType.Root) {
-				const tableObj = this.collection.createObject(this.engine.model.ObjType.Table)
+				const tableObj = this.store.createObject(this.engine.model.ObjType.Table)
 				parent.push(tableObj)
 				tableObj.push(obj)
 				this.pushStack(tableObj)

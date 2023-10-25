@@ -11,10 +11,11 @@ import { literals } from './lib/components/literals.js'
 import { io } from './lib/components/io.js'
 import { model } from './lib/components/model.js'
 import { parser } from './lib/components/parser.js'
+import { structuralizer } from './lib/components/structuralizer.js'
 import { tokenizer } from './lib/components/tokenizer.js'
 
 export function createEngine () {
-	return new engine.Engine({ codecs, lexer, literals, io, model, parser, tokenizer })
+	return new engine.Engine({ codecs, lexer, literals, io, model, parser, structuralizer, tokenizer })
 }
 
-export { codecs, engine, lexer, literals, io, model, parser, tokenizer }
+export { codecs, engine, lexer, literals, io, model, parser, structuralizer, tokenizer }

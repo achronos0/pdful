@@ -1,5 +1,9 @@
 /**
- * Convert document data into structured objects in memory.
+ * Convert document data from bytes to pdf objects
+ *
+ * Parser is the first stage of document loading.
+ *
+ * Parser has two sub-stages: tokenizer, lexer.
  *
  * @module
  */
@@ -13,7 +17,7 @@ import { tokenizer } from './tokenizer.js'
 
 export namespace parser {
 	export interface ParserRunOptions {
-		abortOnWarning?: boolean,
+		abortOnWarning?: boolean
 		onToken?: ((token: tokenizer.Token) => void | Promise<void>) | null
 		onLexer?: ((obj: model.Obj | null, warnings: PdfError[]) => void | Promise<void>) | null
 	}
@@ -25,57 +29,57 @@ export namespace parser {
 		}
 
 		async run (config: {
-			reader: io.ReaderPair,
+			reader: io.ReaderPair
 			options?: ParserRunOptions
-		}): Promise<{ pdfVersion: string, collection: model.ObjCollection, warnings: PdfError[] }> {
+		}): Promise<{ store: model.ObjStore, warnings: PdfError[] }> {
 			const reader = config.reader
 			const options = config.options
 			const { abortOnWarning = false } = options || {}
 
 			const sequentialReader = reader.sequentialReader
 			const offsetReader = reader.offsetReader
-			const collection = new this.engine.model.ObjCollection()
+			const store = new this.engine.model.ObjStore()
 
 			const allWarnings: PdfError[] = []
-			const { pdfVersion, warnings: docWarnings } = await this.parseDocumentData({ sequentialReader, collection, options })
+			const docWarnings = await this.parseDocumentData({ sequentialReader, store, options })
 			if (docWarnings.length) {
 				allWarnings.push(...docWarnings)
 				if (abortOnWarning) {
-					return { pdfVersion, collection, warnings: allWarnings }
+					return { store, warnings: allWarnings }
 				}
 			}
-			await this.resolveRefs({ collection })
-			await this.resolveStreamTypes({ collection })
+			await this.resolveRefs({ store })
+			await this.resolveStreamTypes({ store })
 			{
-				const warnings = await this.parseStreams({ offsetReader, collection, options })
+				const warnings = await this.parseStreams({ offsetReader, store, options })
 				if (warnings.length) {
 					allWarnings.push(...warnings)
 					if (abortOnWarning) {
-						return { pdfVersion, collection, warnings: allWarnings }
+						return { store, warnings: allWarnings }
 					}
 				}
 			}
-			await this.resolveRefs({ collection })
-			await this.resolveCatalog({ collection })
+			await this.resolveRefs({ store })
+			await this.resolveCatalog({ store })
 			{
-				const warnings = await this.resolveMissingRefs({ collection })
+				const warnings = await this.resolveMissingRefs({ store })
 				if (warnings.length) {
 					allWarnings.push(...warnings)
 					if (abortOnWarning) {
-						return { pdfVersion, collection, warnings: allWarnings }
+						return { store, warnings: allWarnings }
 					}
 				}
 			}
-			return { pdfVersion, collection, warnings: allWarnings }
+			return { store, warnings: allWarnings }
 		}
 
 		async parseDocumentData (config: {
-			sequentialReader: io.SequentialReader,
-			collection: model.ObjCollection,
+			sequentialReader: io.SequentialReader
+			store: model.ObjStore
 			options?: ParserRunOptions
-		}): Promise<{ pdfVersion: string, warnings: PdfError[] }> {
+		}): Promise<PdfError[]> {
 			const sequentialReader = config.sequentialReader
-			const collection = config.collection
+			const store = config.store
 			const options = config.options || {}
 			const { abortOnWarning = false } = options || {}
 
@@ -92,7 +96,6 @@ export namespace parser {
 				e.g. in `startxref {n}` the "n" may not be an exact offset in the file
 				We just don't support this yet.
 			*/
-			let pdfVersion: string
 			{
 				const str = await sequentialReader.readString(20, false)
 				const m = /^%PDF-(\d+\.\d+)[\r\n]+/.exec(str)
@@ -100,30 +103,30 @@ export namespace parser {
 					throw new PdfError('Not a PDF: Does not have a PDF header', 'parser:not_pdf:invalid_header')
 				}
 				const headerLength = m[0].length
-				pdfVersion = m[1]
+				store.pdfVersion = m[1]
 				sequentialReader.consume(headerLength)
 			}
-			if (!this.engine.constants.VERSION_DATA[pdfVersion]) {
-				allWarnings.push(new PdfError(`Unsupported PDF version: ${pdfVersion}`, 'parser:unsupported_version', { pdfVersion }))
+			if (!this.engine.constants.VERSION_DATA[store.pdfVersion]) {
+				allWarnings.push(new PdfError(`Unsupported PDF version: ${store.pdfVersion}`, 'parser:unsupported_version', { pdfVersion: store.pdfVersion }))
 				if (abortOnWarning) {
-					return { pdfVersion, warnings: allWarnings }
+					return allWarnings
 				}
 			}
 
-			const tableObj = collection.createObject(this.engine.model.ObjType.Table)
-			collection.root.push(tableObj)
+			const tableObj = store.createObject(this.engine.model.ObjType.Table)
+			store.root.push(tableObj)
 
-			const stack = [collection.root, tableObj]
-			const warnings = await this._parseObjectData({ sequentialReader, collection, stack, options })
+			const stack = [store.root, tableObj]
+			const warnings = await this._parseObjectData({ sequentialReader, store, stack, options })
 			allWarnings.push(...warnings)
-			return { pdfVersion, warnings: allWarnings }
+			return allWarnings
 		}
 
-		async resolveRefs (config: { collection: model.ObjCollection }) {
-			const collection = config.collection
-			for (const refObj of collection.refs.values()) {
+		async resolveRefs (config: { store: model.ObjStore }) {
+			const store = config.store
+			for (const refObj of store.refs.values()) {
 				if (refObj.identifier && !refObj.indirect) {
-					const obj = collection.identifier(refObj.identifier)
+					const obj = store.identifier(refObj.identifier)
 					if (obj) {
 						refObj.indirect = obj
 					}
@@ -131,10 +134,10 @@ export namespace parser {
 			}
 		}
 
-		async resolveMissingRefs (config: { collection: model.ObjCollection }) {
+		async resolveMissingRefs (config: { store: model.ObjStore }) {
 			const warnings: PdfError[] = []
-			const collection = config.collection
-			for (const refObj of collection.refs.values()) {
+			const store = config.store
+			for (const refObj of store.refs.values()) {
 				if (refObj.identifier && !refObj.indirect) {
 					const key = String(refObj.identifier.num) + '/' + String(refObj.identifier.gen)
 					warnings.push(new PdfError(`Reference to missing indirect obj ${key}`, 'parser:invalid:ref:identifier', { type: 'ref', obj: refObj }))
@@ -143,9 +146,9 @@ export namespace parser {
 			return warnings
 		}
 
-		async resolveStreamTypes (config: { collection: model.ObjCollection }) {
-			const collection = config.collection
-			for (const streamObj of collection.streams.values()) {
+		async resolveStreamTypes (config: { store: model.ObjStore }) {
+			const store = config.store
+			for (const streamObj of store.streams.values()) {
 				const dictObj = streamObj.dictionary
 				if (!dictObj) {
 					continue
@@ -175,16 +178,16 @@ export namespace parser {
 
 		async parseStreams (config: {
 			offsetReader: io.OffsetReader,
-			collection: model.ObjCollection,
+			store: model.ObjStore,
 			options?: ParserRunOptions
 		}): Promise<PdfError[]> {
 			const offsetReader = config.offsetReader
-			const collection = config.collection
+			const store = config.store
 			const options = config.options
 			const { abortOnWarning = false } = options || {}
 
 			const allWarnings: PdfError[] = []
-			for (const streamObj of collection.streams.values()) {
+			for (const streamObj of store.streams.values()) {
 				const streamType = streamObj.streamType
 				if (!streamType) {
 					continue
@@ -229,7 +232,7 @@ export namespace parser {
 						allWarnings.push(...warnings)
 					}
 				}
-				collection.addObject(directObj)
+				store.addObject(directObj)
 				streamObj.direct = directObj
 				directObj.parent = streamObj
 				if (allWarnings.length && abortOnWarning) {
@@ -239,10 +242,10 @@ export namespace parser {
 			return allWarnings
 		}
 
-		async resolveCatalog (config: { collection: model.ObjCollection }) {
-			const collection = config.collection
+		async resolveCatalog (config: { store: model.ObjStore }) {
+			const store = config.store
 
-			for (const tableObj of collection.root.children.values()) {
+			for (const tableObj of store.root.children.values()) {
 				if (!(tableObj instanceof this.engine.model.ObjType.Table)) {
 					continue
 				}
@@ -276,7 +279,7 @@ export namespace parser {
 					}
 				}
 				if (catalogObj) {
-					collection.catalog = catalogObj
+					store.catalog = catalogObj
 				}
 			}
 		}
@@ -299,9 +302,12 @@ export namespace parser {
 			if (dictData.F) {
 				warnings.push(new PdfError(`@TODO: Not implemented: Stream resource specifies an external file`, 'parser:not_implemented:stream:file', { type: 'Stream', notImplemented: true }))
 			}
-			const actualLength = sourceLocation.end - sourceLocation.start
+			let actualLength = sourceLocation.end - sourceLocation.start
 			if (typeof dictData.Length === 'number' && dictData.Length !== actualLength) {
-				warnings.push(new PdfError(`Stream resource length mismatch at offset ${sourceLocation.start}`, 'parser:invalid:stream:length_mismatch', { type: 'Stream', dictLength: dictData.Length, actualLength, dictData }))
+				sourceLocation.end = sourceLocation.start + dictData.Length
+				if (actualLength < dictData.Length || actualLength > dictData.Length + 2) {
+					warnings.push(new PdfError(`Stream resource length mismatch at offset ${sourceLocation.start}`, 'parser:invalid:stream:length_mismatch', { type: 'Stream', dictLength: dictData.Length, actualLength, dictData }))
+				}
 			}
 
 			const filters: codecs.StreamFilter[] = []
@@ -357,29 +363,29 @@ export namespace parser {
 			const streamObj = config.streamObj
 			const bytes = config.bytes
 			const options = config.options || {}
-			const collection = streamObj.collection
+			const store = streamObj.store
 
-			const obj = collection.createObject(this.engine.model.ObjType.Content)
+			const obj = store.createObject(this.engine.model.ObjType.Content)
 
 			const sequentialReader = new this.engine.io.SequentialMemoryReader(bytes)
 			const stack = [obj]
-			const warnings = await this._parseObjectData({ sequentialReader, collection, stack, options })
+			const warnings = await this._parseObjectData({ sequentialReader, store, stack, options })
 
 			return { obj, warnings }
 		}
 
 		async parseObjectStreamObj (config: {
-			streamObj: model.ObjType.Stream,
-			bytes: Uint8Array,
+			streamObj: model.ObjType.Stream
+			bytes: Uint8Array
 			options?: ParserRunOptions
 		}): Promise<{ obj: model.ObjType.Array, warnings: PdfError[]}> {
 			const streamObj = config.streamObj
 			const bytes = config.bytes
 			const options = config.options || {}
-			const collection = streamObj.collection
+			const store = streamObj.store
 			const dictObj = streamObj.dictionary
 
-			const obj = collection.createObject(this.engine.model.ObjType.Array)
+			const obj = store.createObject(this.engine.model.ObjType.Array)
 
 			if (!dictObj) {
 				return { obj, warnings: [] }
@@ -408,14 +414,14 @@ export namespace parser {
 			}
 
 			for (const [num, start, end] of objOffsets) {
-				const indirectObj = collection.createObject(this.engine.model.ObjType.Indirect)
+				const indirectObj = store.createObject(this.engine.model.ObjType.Indirect)
 				indirectObj.identifier = { num, gen: 0 }
 				indirectObj.parent = obj
 				obj.push(indirectObj)
-				collection.addObject(indirectObj)
+				store.addObject(indirectObj)
 				const sequentialReader = new this.engine.io.SequentialMemoryReader(bytes.subarray(start, end))
 				const stack = [indirectObj]
-				const warnings = await this._parseObjectData({ sequentialReader, collection, stack, options })
+				const warnings = await this._parseObjectData({ sequentialReader, store, stack, options })
 				allWarnings.push(...warnings)
 			}
 
@@ -423,18 +429,18 @@ export namespace parser {
 		}
 
 		async parseXrefStreamObj (config: {
-			streamObj: model.ObjType.Stream,
-			bytes: Uint8Array,
+			streamObj: model.ObjType.Stream
+			bytes: Uint8Array
 			options?: ParserRunOptions
 		}): Promise<{ obj: model.ObjType.Xref, warnings: PdfError[]}> {
 			const streamObj = config.streamObj
 			const bytes = config.bytes
 			// const options = config.options
-			const collection = streamObj.collection
+			const store = streamObj.store
 			const dictObj = streamObj.dictionary
 
 			const warnings: PdfError[] = []
-			const obj = collection.createObject(this.engine.model.ObjType.Xref)
+			const obj = store.createObject(this.engine.model.ObjType.Xref)
 
 			if (!dictObj) {
 				return { obj, warnings }
@@ -560,8 +566,8 @@ export namespace parser {
 		}
 
 		async parseImageStreamObj (config: {
-			streamObj: model.ObjType.Stream,
-			bytes: Uint8Array,
+			streamObj: model.ObjType.Stream
+			bytes: Uint8Array
 			options?: ParserRunOptions
 		}): Promise<{ obj: model.ObjType.Bytes, warnings: PdfError[]}> {
 			const streamObj = config.streamObj
@@ -571,36 +577,36 @@ export namespace parser {
 		}
 
 		async parseBinaryStreamObj (config: {
-			streamObj: model.ObjType.Stream,
-			bytes: Uint8Array,
+			streamObj: model.ObjType.Stream
+			bytes: Uint8Array
 			options?: ParserRunOptions
 		}): Promise<{ obj: model.ObjType.Bytes, warnings: PdfError[]}> {
 			const streamObj = config.streamObj
 			const bytes = config.bytes
 			// const options = config.options
-			const collection = streamObj.collection
+			const store = streamObj.store
 
-			const obj = collection.createObject(this.engine.model.ObjType.Bytes)
+			const obj = store.createObject(this.engine.model.ObjType.Bytes)
 			obj.value = bytes
 
 			return { obj, warnings: []}
 		}
 
 		protected async _parseObjectData (config: {
-			sequentialReader: io.SequentialReader,
-			collection: model.ObjCollection,
-			stack: model.ObjWithChildren[],
+			sequentialReader: io.SequentialReader
+			store: model.ObjStore
+			stack: model.ObjWithChildren[]
 			options: ParserRunOptions
 		}): Promise<PdfError[]> {
 			const sequentialReader = config.sequentialReader
-			const collection = config.collection
+			const store = config.store
 			const stack = config.stack
 			const { abortOnWarning = false, onToken, onLexer } = config.options || {}
 			const engine = this.engine
 			const allWarnings: PdfError[] = []
 
 			const tokenizer = new this.engine.tokenizer.Tokenizer({ engine, sequentialReader })
-			const lexer = new this.engine.lexer.Lexer({ engine, collection })
+			const lexer = new this.engine.lexer.Lexer({ engine, store })
 			lexer.stack = stack
 			const tokenGenerator = tokenizer.tokens()
 			for await (const token of tokenGenerator) {

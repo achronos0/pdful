@@ -67,9 +67,6 @@ export namespace literals {
 				...this.byteCharRange('A', 'Z', '')
 			]
 		}
-		get TOKEN_BYTE_ENDSTREAM () {
-			return [...this.TOKEN_BYTE_EOL, this.byteChar('e')]
-		}
 
 		get LEXER_STRING_TESTS () {
 			return {

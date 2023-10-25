@@ -7,13 +7,16 @@
  * @module
  */
 
+import type { PdfError } from '../core.js'
+
 export namespace model {
 	export interface Obj {
 		type: ObjTypeString
-		collection: ObjCollection
+		store: ObjStore
 		parent: ObjWithChildren | null
 		uid: number
 		getData (): unknown
+		dereference (): Obj | null
 	}
 	export interface ObjWithValue extends Obj {
 		value: unknown
@@ -24,7 +27,7 @@ export namespace model {
 		getChildrenValue (indirects: number[]): unknown
 	}
 	export interface ObjConstructor {
-		new (collection: ObjCollection, uid: number): Obj
+		new (store: ObjStore, uid: number): Obj
 	}
 
 	export type ObjTypeString = (
@@ -60,13 +63,14 @@ export namespace model {
 	)
 
 	export interface IndirectObjIdentifier {
-		num: number,
+		num: number
 		gen: number
 	}
 
-	export class ObjCollection {
+	export class ObjStore {
 		static maxUid = 0
 		readonly root: RootObj
+		pdfVersion: string | null = null
 		objects: Map<number, Obj> = new Map()
 		indirects: Map<string, IndirectObj> = new Map()
 		refs: Set<RefObj> = new Set()
@@ -92,13 +96,13 @@ export namespace model {
 		}
 
 		createObject <T extends ObjConstructor>(Type: T): InstanceType<T> {
-			const obj = new Type(this, ++ObjCollection.maxUid)
+			const obj = new Type(this, ++ObjStore.maxUid)
 			this.addObject(obj)
 			return obj as InstanceType<T>
 		}
 
 		addObject (obj: Obj) {
-			obj.collection = this
+			obj.store = this
 			this.objects.set(obj.uid, obj)
 			if (obj instanceof IndirectObj && obj.identifier) {
 				const key = String(obj.identifier.num) + '/' + String(obj.identifier.gen)
@@ -114,12 +118,19 @@ export namespace model {
 	}
 
 	abstract class ObjBase {
-		collection: ObjCollection
+		type = 'null'
+		store: ObjStore
 		parent: ObjWithChildren | null = null
 		uid: number
-		constructor (collection: ObjCollection, uid: number) {
-			this.collection = collection
+		constructor (store: ObjStore, uid: number) {
+			this.store = store
 			this.uid = uid
+		}
+		getData (): unknown {
+			return null
+		}
+		dereference (): Obj | null {
+			return this as Obj
 		}
 	}
 
@@ -232,9 +243,12 @@ export namespace model {
 	class DictionaryObj extends ObjBase implements ObjWithChildren {
 		readonly type: ObjTypeString = 'Dictionary'
 		children: Map<string, Obj> = new Map()
-		getChildrenData () {
+		getChildrenData (except: string[] = []) {
 			const data: { [key: string]: unknown } = {}
 			for (const [key, obj] of this.children.entries()) {
+				if (except.includes(key)) {
+					continue
+				}
 				data[key] = obj.getData()
 			}
 			return data
@@ -272,6 +286,10 @@ export namespace model {
 			else {
 				this.children.delete('direct')
 			}
+		}
+		dereference () {
+			const direct = this.direct
+			return direct ? direct.dereference() : null
 		}
 		getChildrenData () {
 			return {
@@ -370,6 +388,10 @@ export namespace model {
 			const indirect = this.indirect
 			return indirect ? indirect.direct : null
 		}
+		dereference () {
+			const direct = this.direct
+			return direct ? direct.dereference() : null
+		}
 		getData() {
 			const identifier = this.identifier
 			const indirectUid = this.indirect ? this.indirect.uid : null
@@ -436,6 +458,10 @@ export namespace model {
 			else {
 				this.children.delete('direct')
 			}
+		}
+		dereference () {
+			const direct = this.direct
+			return direct ? direct.dereference() : null
 		}
 		getChildrenData () {
 			return {
@@ -573,5 +599,32 @@ export namespace model {
 		export type Stream = StreamObj
 		export type Text = TextObj
 		export type Xref = XrefObj
+	}
+
+	export class Structure {
+		pages: unknown[] = []
+	}
+
+	export class Document {
+		readonly store: ObjStore
+		readonly parserWarnings: PdfError[]
+		readonly structure: Structure
+		readonly structuralizerWarnings: PdfError[]
+
+		constructor (config: {
+			store: ObjStore
+			parserWarnings: PdfError[]
+			structure: Structure,
+			structuralizerWarnings: PdfError[]
+		}) {
+			this.store = config.store
+			this.parserWarnings = config.parserWarnings
+			this.structure = config.structure
+			this.structuralizerWarnings = config.structuralizerWarnings
+		}
+
+		get catalog () {
+			return this.store.catalog
+		}
 	}
 }

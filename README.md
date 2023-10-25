@@ -1,3 +1,3 @@
 # pdful
 
-PDF updater library
+PDF editor/updater library

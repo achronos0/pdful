@@ -1,7 +1,7 @@
 /**
- * Convert document data from a byte array into a sequence of syntax tokens.
+ * Convert document data from bytes to syntax tokens
  *
- * Tokenizer is the first stage of parsing.
+ * Tokenizer is the first stage of parser.
  *
  * @module
  */
@@ -24,7 +24,7 @@ export namespace tokenizer {
 		 * Create pdf document tokenizer
 		 */
 		constructor (config: {
-			engine: engine.Engine,
+			engine: engine.Engine
 			sequentialReader: io.SequentialReader
 		}) {
 			this.engine = config.engine
@@ -301,11 +301,10 @@ export namespace tokenizer {
 						const streamStart = this.reader.offset
 						let streamEnd = null
 						while (!this.reader.eof) {
-							let byte = await this.reader.readByte(true)
-							if (this.engine.constants.TOKEN_BYTE_ENDSTREAM.includes(byte)) {
-								const char = String.fromCharCode(byte)
-								const str = char + await this.reader.readString(11, false)
-								const m = /^(?:\r\n|\r|\n)?endstream[\r\n]/.exec(str)
+							let char = await this.reader.readChar(true)
+							if (char === 'e') {
+								const str = char + await this.reader.readString(9, false)
+								const m = /^endstream[\r\n]/.exec(str)
 								if (m) {
 									const len = m[0].length
 									this.reader.consume(len - 1)
