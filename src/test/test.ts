@@ -9,6 +9,7 @@ const INPUT_NUMBER = 6
 const INPUT_FILE = `input/${INPUT_NUMBER}.pdf`
 const INPUT_USE_BUFFER = false
 const ABORT_ON_WARNING = true
+const PRINT_STRUCTURE = true
 const PRINT_ROOT_OBJ = false
 const PRINT_CATALOG_OBJ = false
 const PRINT_OBJ_OPTIONS: PrintObjTreeOptions = {
@@ -59,6 +60,9 @@ async function run () {
 
 	// Report results
 	console.log('pdfVersion: ', document.store.pdfVersion)
+	if (PRINT_STRUCTURE) {
+		console.log(document.structure)
+	}
 	if (PRINT_ROOT_OBJ) {
 		printObjTree(document.store.root, PRINT_OBJ_OPTIONS)
 	}

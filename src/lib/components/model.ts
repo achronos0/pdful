@@ -243,7 +243,8 @@ export namespace model {
 	class DictionaryObj extends ObjBase implements ObjWithChildren {
 		readonly type: ObjTypeString = 'Dictionary'
 		children: Map<string, Obj> = new Map()
-		getChildrenData (except: string[] = []) {
+		getChildrenData (options: {except?: string[]} = {}) {
+			const { except = [] } = options
 			const data: { [key: string]: unknown } = {}
 			for (const [key, obj] of this.children.entries()) {
 				if (except.includes(key)) {
@@ -602,6 +603,8 @@ export namespace model {
 	}
 
 	export class Structure {
+		catalog: DictionaryObj | null = null
+		pdfVersion: string | null = null
 		pages: unknown[] = []
 	}
 
@@ -623,8 +626,16 @@ export namespace model {
 			this.structuralizerWarnings = config.structuralizerWarnings
 		}
 
+		get pdfVersion () {
+			return this.structure.pdfVersion
+		}
+
 		get catalog () {
-			return this.store.catalog
+			return this.structure.catalog
+		}
+
+		get pages () {
+			return this.structure.pages
 		}
 	}
 }

@@ -20,49 +20,67 @@ export namespace structuralizer {
 		run (config: {
 			store: model.ObjStore
 		}) {
-			// const pdfVersion = config.pdfVersion
 			const store = config.store
 			const catalog = store.catalog
+			const pdfVersion = store.pdfVersion
 
 			const structure = new this.engine.model.Structure()
 			const warnings: PdfError[] = []
 
+			structure.pdfVersion = pdfVersion
 			if (!catalog) {
 				// @TODO warn
 				return { structure, warnings }
 			}
+			structure.catalog = catalog
 
-			const pagesRefObj = catalog.children.get('Pages')
-			const pagesObj = pagesRefObj?.dereference() || null
-			if (!(pagesObj instanceof this.engine.model.ObjType.Dictionary)) {
+			const pagesObj = catalog.children.get('Pages')?.dereference()
+			if (pagesObj instanceof this.engine.model.ObjType.Dictionary) {
+				const pages: any[] = []
+				const walkPagesTree = (dictObj: model.ObjType.Dictionary, parentDictData: object) => {
+					const dictData = dictObj.getChildrenData({ except: ['Parent', 'Kids', 'Count']})
+					const type = dictData.Type || null
+					delete dictData.type
+					const combinedDictData = Object.assign({}, parentDictData, dictData)
+					if (type === 'Page' || 'Content' in dictData) {
+						pages.push(combinedDictData)
+						return
+					}
+					const kidsObj = dictObj.children.get('Kids')
+					if (kidsObj instanceof this.engine.model.ObjType.Array) {
+						for (const childRefObj of kidsObj.children.values()) {
+							const childObj = childRefObj.dereference()
+							if (childObj instanceof this.engine.model.ObjType.Dictionary) {
+								walkPagesTree(childObj, combinedDictData)
+							}
+						}
+					}
+				}
+				walkPagesTree(pagesObj, {})
+				structure.pages = pages
+			}
+			if (!structure.pages.length) {
 				// @TODO warn
-				return { structure, warnings }
 			}
 
-			const pages: any[] = []
-			const walkPagesTree = (dictObj: model.ObjType.Dictionary, parentDictData: object) => {
-				const dictData = dictObj.getChildrenData(['Parent', 'Kids', 'Count'])
-				const type = dictData.Type || null
-				console.log('walkPagesTree top type=', type, 'Object.keys(dictData)=', Object.keys(dictData))
-				delete dictData.type
-				const combinedDictData = Object.assign({}, parentDictData, dictData)
-				if (type === 'Page' || 'Content' in dictData) {
-					pages.push(combinedDictData)
-					return
-				}
-				const kidsObj = dictObj.children.get('Kids')
-				if (kidsObj instanceof this.engine.model.ObjType.Array) {
-					for (const childRefObj of kidsObj.children.values()) {
-						const childObj = childRefObj.dereference()
-						if (childObj instanceof this.engine.model.ObjType.Dictionary) {
-							walkPagesTree(childObj, combinedDictData)
+			const catalogEntryHandlers: { [key: string]: (directObj: model.Obj) => void } = {
+				Version: directObj => {
+					if ('value' in directObj) {
+						const value = directObj.value
+						if (typeof value === 'string') {
+							structure.pdfVersion = value
 						}
 					}
 				}
 			}
-			walkPagesTree(pagesObj, {})
-
-			console.log('pages=', pages)
+			for (const [key, obj] of catalog.children.entries()) {
+				if (key in catalogEntryHandlers) {
+					const directObj = obj.dereference()
+					if (directObj) {
+						catalogEntryHandlers[key](directObj)
+					}
+				}
+			}
 
 			return { structure, warnings }
 
