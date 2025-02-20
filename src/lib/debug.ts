@@ -113,7 +113,7 @@ export async function printObjTree (obj: model.Obj, options: PrintObjTreeOptions
 			}
 		}
 
-		print(obj.type)
+		print(obj.type || 'NO_TYPE')
 		if (tagSuffix) {
 			print(tagSuffix)
 		}

@@ -267,6 +267,9 @@ export namespace lexer {
 
 		insertObject (obj: model.Obj, token: tokenizer.Token): PdfError[] {
 			const warnings: PdfError[] = []
+			if (obj instanceof this.engine.model.ObjType.Comment) {
+				return warnings
+			}
 			if (this.pendingTrailer && obj instanceof this.engine.model.ObjType.Dictionary) {
 				this.pendingTrailer = obj
 				return warnings

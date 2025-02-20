@@ -5,11 +5,12 @@ import { PrintObjTreeOptions, printObjTree } from '../lib/debug.js'
 import type { parser } from '../lib/components/parser.js'
 
 // Constants
-const INPUT_NUMBER = 6
+const INPUT_NUMBER = 7
 const INPUT_FILE = `input/${INPUT_NUMBER}.pdf`
 const INPUT_USE_BUFFER = false
-const ABORT_ON_WARNING = true
-const PRINT_STRUCTURE = true
+const ABORT_ON_WARNING = false
+const PRINT_PAGE: number | false = 1
+const PRINT_STRUCTURE = false
 const PRINT_ROOT_OBJ = false
 const PRINT_CATALOG_OBJ = false
 const PRINT_OBJ_OPTIONS: PrintObjTreeOptions = {
@@ -60,6 +61,16 @@ async function run () {
 
 	// Report results
 	console.log('pdfVersion: ', document.store.pdfVersion)
+	if (PRINT_PAGE) {
+		const pageContents = (document.structure.pages[PRINT_PAGE - 1] as any).Contents as any
+		if (pageContents) {
+			// console.log('pageContents:', pageContents)
+			printObjTree(pageContents, PRINT_OBJ_OPTIONS)
+		}
+		else {
+			console.warn('No page object')
+		}
+	}
 	if (PRINT_STRUCTURE) {
 		console.log(document.structure)
 	}
